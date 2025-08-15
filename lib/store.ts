@@ -20,6 +20,8 @@ export interface Message {
     title: string
     description: string
     data: any[]
+    xAxisLabel?: string
+    yAxisLabel?: string
   }
   diagramData?: {
     type: string
@@ -99,15 +101,60 @@ export const useConversationStore = create<ChatState>()(
 
       // Actions
       setIsLoading: (loading) => set({ isLoading: loading }),
+      setSupabase: (client) => set({ supabase: client }),
+
       loadConversations: async () => {
         try {
+          console.log("Loading conversations from database...")
+
+          // Get user first
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser()
+
+          if (userError) {
+            console.error("User error:", userError)
+            throw userError
+          }
+
+          if (!user) {
+            console.log("No authenticated user found")
+            set({ conversations: [], error: null })
+            return []
+          }
+
+          console.log("Loading conversations for user:", user.id)
+
+          // Check if conversations table exists and create if needed
           const { data: conversationsData, error: conversationsError } = await supabase
             .from("conversations")
             .select("*")
+            .eq("user_id", user.id)
             .order("updated_at", { ascending: false })
 
-          if (conversationsError) throw conversationsError
+          if (conversationsError) {
+            console.error("Conversations error:", conversationsError)
 
+            // If table doesn't exist, return empty array
+            if (conversationsError.message?.includes("does not exist")) {
+              console.log("Conversations table doesn't exist, returning empty array")
+              set({ conversations: [], error: null })
+              return []
+            }
+
+            throw conversationsError
+          }
+
+          console.log("Loaded conversations:", conversationsData)
+
+          if (!conversationsData || conversationsData.length === 0) {
+            console.log("No conversations found")
+            set({ conversations: [], error: null })
+            return []
+          }
+
+          // Load messages for these conversations
           const { data: messagesData, error: messagesError } = await supabase
             .from("messages")
             .select("*")
@@ -117,29 +164,77 @@ export const useConversationStore = create<ChatState>()(
             )
             .order("created_at", { ascending: true })
 
-          if (messagesError) throw messagesError
+          if (messagesError) {
+            console.error("Messages error:", messagesError)
+            // Continue without messages if there's an error
+          }
 
-          const conversations: Conversation[] = conversationsData.map((conv) => ({
-            id: conv.id,
-            title: conv.title,
-            messages: messagesData
-              .filter((msg) => msg.conversation_id === conv.id)
-              .map((msg) => ({
-                id: msg.id,
-                content: msg.content,
-                type: msg.type as MessageType,
-                role: msg.role as "user" | "assistant",
-                chartData: msg.chart_data,
-                diagramData: msg.diagram_data,
-                fileAttachment: msg.file_attachment,
-                createdAt: new Date(msg.created_at),
-              })),
-            createdAt: new Date(conv.created_at),
-            updatedAt: new Date(conv.updated_at),
-            userId: conv.user_id,
-            isFavorite: conv.is_favorite || false,
-          }))
+          console.log("Loaded messages:", messagesData)
 
+          const conversations: Conversation[] = conversationsData.map((conv) => {
+            const conversationMessages =
+              messagesData
+                ?.filter((msg) => msg.conversation_id === conv.id)
+                .map((msg) => {
+                  console.log("Processing message:", msg)
+
+                  // Parse chart_data if it exists
+                  let chartData = null
+                  if (msg.chart_data) {
+                    try {
+                      chartData = typeof msg.chart_data === "string" ? JSON.parse(msg.chart_data) : msg.chart_data
+                      console.log("Parsed chart data:", chartData)
+                    } catch (e) {
+                      console.error("Error parsing chart_data:", e, msg.chart_data)
+                    }
+                  }
+
+                  // Parse diagram_data if it exists
+                  let diagramData = null
+                  if (msg.diagram_data) {
+                    try {
+                      diagramData =
+                        typeof msg.diagram_data === "string" ? JSON.parse(msg.diagram_data) : msg.diagram_data
+                    } catch (e) {
+                      console.error("Error parsing diagram_data:", e)
+                    }
+                  }
+
+                  // Parse file_attachment if it exists
+                  let fileAttachment = null
+                  if (msg.file_attachment) {
+                    try {
+                      fileAttachment =
+                        typeof msg.file_attachment === "string" ? JSON.parse(msg.file_attachment) : msg.file_attachment
+                    } catch (e) {
+                      console.error("Error parsing file_attachment:", e)
+                    }
+                  }
+
+                  return {
+                    id: msg.id,
+                    content: msg.content || "",
+                    type: (msg.type as MessageType) || "text",
+                    role: (msg.role as "user" | "assistant") || "user",
+                    chartData,
+                    diagramData,
+                    fileAttachment,
+                    createdAt: new Date(msg.created_at),
+                  }
+                }) || []
+
+            return {
+              id: conv.id,
+              title: conv.title,
+              messages: conversationMessages,
+              createdAt: new Date(conv.created_at),
+              updatedAt: new Date(conv.updated_at),
+              userId: conv.user_id,
+              isFavorite: conv.is_favorite || false,
+            }
+          })
+
+          console.log("Final conversations:", conversations)
           set({ conversations, error: null })
           return conversations
         } catch (error) {
@@ -152,26 +247,40 @@ export const useConversationStore = create<ChatState>()(
 
       addConversation: async (title) => {
         const id = crypto.randomUUID()
-        const newConversation: Conversation = {
-          id,
-          title,
-          messages: [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          userId: (await supabase.auth.getUser()).data.user?.id || "",
-          isFavorite: false,
-        }
 
         try {
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser()
+          if (userError) throw userError
+          if (!user) throw new Error("No authenticated user")
+
+          const newConversation: Conversation = {
+            id,
+            title,
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            userId: user.id,
+            isFavorite: false,
+          }
+
+          console.log("Creating new conversation:", newConversation)
+
           const { error } = await supabase.from("conversations").insert({
             id: newConversation.id,
             title: newConversation.title,
             user_id: newConversation.userId,
             created_at: newConversation.createdAt.toISOString(),
             updated_at: newConversation.updatedAt.toISOString(),
+            is_favorite: false,
           })
 
-          if (error) throw error
+          if (error) {
+            console.error("Error creating conversation:", error)
+            throw error
+          }
 
           set((state) => ({
             conversations: [newConversation, ...state.conversations],
@@ -183,6 +292,7 @@ export const useConversationStore = create<ChatState>()(
           return id
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Failed to create conversation"
+          console.error("Error in addConversation:", error)
           set({ error: errorMessage })
           throw error
         }
@@ -246,34 +356,67 @@ export const useConversationStore = create<ChatState>()(
 
       addMessage: async (conversationId, message) => {
         try {
-          const { error } = await supabase.from("messages").insert({
-            id: crypto.randomUUID(),
+          console.log("Adding message to database:", message)
+
+          // Get current user
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser()
+          if (userError) throw userError
+          if (!user) throw new Error("No authenticated user")
+
+          // Prepare data for database
+          const messageData = {
+            id: message.id,
             conversation_id: conversationId,
+            user_id: user.id,
             content: message.content,
             type: message.type,
             role: message.role,
-            chart_data: message.chartData,
-            diagram_data: message.diagramData,
-            file_attachment: message.fileAttachment,
+            chart_data: message.chartData ? JSON.stringify(message.chartData) : null,
+            diagram_data: message.diagramData ? JSON.stringify(message.diagramData) : null,
+            file_attachment: message.fileAttachment ? JSON.stringify(message.fileAttachment) : null,
             created_at: message.createdAt.toISOString(),
-          })
+          }
 
-          if (error) throw error
+          console.log("Message data for database:", messageData)
 
+          const { error } = await supabase.from("messages").insert(messageData)
+
+          if (error) {
+            console.error("Database insert error:", error)
+            throw error
+          }
+
+          // Update conversation's updated_at timestamp
+          const { error: updateError } = await supabase
+            .from("conversations")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", conversationId)
+
+          if (updateError) {
+            console.error("Error updating conversation timestamp:", updateError)
+          }
+
+          // Update local state
           set((state) => ({
             conversations: state.conversations.map((conv) =>
               conv.id === conversationId
                 ? {
                     ...conv,
-                    messages: [...conv.messages, { ...message, id: crypto.randomUUID() }],
+                    messages: [...conv.messages, message],
                     updatedAt: new Date(),
                   }
                 : conv,
             ),
             error: null,
           }))
+
+          console.log("Message added successfully")
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Failed to add message"
+          console.error("Error in addMessage:", error)
           set({ error: errorMessage })
           throw error
         }
@@ -363,6 +506,7 @@ export const useConversationStore = create<ChatState>()(
       setIsDeleting: (isDeleting) => set({ isDeleting }),
       setIsRefreshing: (isRefreshing) => set({ isRefreshing }),
       setIsDeletingFromSidebar: (isDeletingFromSidebar) => set({ isDeletingFromSidebar }),
+
       initializeStore: async () => {
         set({ isLoading: true })
         try {
@@ -373,15 +517,20 @@ export const useConversationStore = create<ChatState>()(
           if (sessionError) throw sessionError
 
           if (!session) {
-            throw new Error("No active session")
+            console.log("No active session, skipping conversation loading")
+            set({ conversations: [], isInitialized: true })
+            return
           }
 
           await get().loadConversations()
           set({ isInitialized: true })
         } catch (error) {
           console.error("Failed to initialize store:", error)
-          set({ error: error instanceof Error ? error.message : "Failed to initialize" })
-          throw error
+          set({
+            error: error instanceof Error ? error.message : "Failed to initialize",
+            conversations: [],
+            isInitialized: true,
+          })
         } finally {
           set({ isLoading: false })
         }
