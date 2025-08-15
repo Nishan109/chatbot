@@ -23,15 +23,22 @@ interface Message {
 
 export function Chat() {
   const { user } = useAuth()
-  const { messages, currentConversationId, isLoading, loadMessages, loadConversations, addMessage } =
-    useConversationStore()
+  const {
+    messages = [],
+    currentConversationId,
+    isLoading,
+    loadMessages,
+    loadConversations,
+    addMessage,
+  } = useConversationStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   console.log("Chat component render:", {
-    messagesCount: messages.length,
+    messagesCount: messages?.length || 0,
     currentConversationId,
     isLoading,
     userId: user?.id,
+    messages: messages || [],
   })
 
   useEffect(() => {
@@ -139,6 +146,9 @@ export function Chat() {
     )
   }
 
+  // Ensure messages is always an array
+  const safeMessages = Array.isArray(messages) ? messages : []
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -146,7 +156,7 @@ export function Chat() {
         <div>
           <h1 className="text-lg font-semibold">Chart Bot</h1>
           <p className="text-sm text-muted-foreground">
-            Messages: {messages.length} | Conversation: {currentConversationId || "None"}
+            Messages: {safeMessages.length} | Conversation: {currentConversationId || "None"}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
@@ -157,7 +167,7 @@ export function Chat() {
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
-          {messages.length === 0 && !isLoading ? (
+          {safeMessages.length === 0 && !isLoading ? (
             <div className="text-center py-8">
               <div className="bg-muted rounded-lg p-6 max-w-md mx-auto">
                 <h3 className="font-semibold mb-2">Welcome to Chart Bot!</h3>
@@ -165,10 +175,18 @@ export function Chat() {
                   I'm specialized in creating charts and data visualizations. Ask me to create a chart, graph, or
                   visualize some data!
                 </p>
+                <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+                  <p>Try asking:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>"Make a bar chart of top 5 tech companies"</li>
+                    <li>"Create a pie chart of sales data"</li>
+                    <li>"Show me a line graph of monthly revenue"</li>
+                  </ul>
+                </div>
               </div>
             </div>
           ) : (
-            messages.map((message) => <ChatMessage key={message.id} message={message} />)
+            safeMessages.map((message) => <ChatMessage key={message.id} message={message} />)
           )}
 
           {isLoading && (

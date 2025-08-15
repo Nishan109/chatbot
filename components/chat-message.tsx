@@ -1,11 +1,34 @@
 "use client"
 
-import type { Message } from "@/lib/store"
 import { Card } from "@/components/ui/card"
 import { motion } from "framer-motion"
 import { User, Bot } from "lucide-react"
 import { ChartCard } from "./chart-card"
 import { DiagramRenderer } from "./diagram-renderer"
+
+interface Message {
+  id: string
+  content: string
+  role: "user" | "assistant"
+  type: "text" | "chart" | "diagram"
+  chart_data?: any
+  diagram_data?: any
+  file_attachment?: any
+  created_at: string
+  chartData?: {
+    type: string
+    title: string
+    description: string
+    data: any[]
+    xAxisLabel?: string
+    yAxisLabel?: string
+  }
+  diagramData?: {
+    type: string
+    title: string
+    code: string
+  }
+}
 
 interface ChatMessageProps {
   message: Message
@@ -19,8 +42,28 @@ export function ChatMessage({ message }: ChatMessageProps) {
     type: message.type,
     role: message.role,
     content: message.content,
-    chartData: message.chartData,
+    chartData: message.chartData || message.chart_data,
   })
+
+  // Parse chart data if it exists
+  let chartData = message.chartData
+  if (!chartData && message.chart_data) {
+    try {
+      chartData = typeof message.chart_data === "string" ? JSON.parse(message.chart_data) : message.chart_data
+    } catch (e) {
+      console.error("Error parsing chart_data:", e)
+    }
+  }
+
+  // Parse diagram data if it exists
+  let diagramData = message.diagramData
+  if (!diagramData && message.diagram_data) {
+    try {
+      diagramData = typeof message.diagram_data === "string" ? JSON.parse(message.diagram_data) : message.diagram_data
+    } catch (e) {
+      console.error("Error parsing diagram_data:", e)
+    }
+  }
 
   return (
     <motion.div
@@ -37,45 +80,45 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
       <div className={`max-w-[80%] ${isUser ? "order-first" : ""}`}>
         {message.type === "text" && (
-          <Card
-            className={`p-4 ${
-              isUser ? "bg-green-500 text-white ml-auto" : "bg-zinc-800 text-gray-100 border-zinc-700"
-            }`}
-          >
+          <Card className={`p-4 ${isUser ? "bg-green-500 text-white ml-auto" : "bg-muted text-muted-foreground"}`}>
             <p className="whitespace-pre-wrap">{message.content}</p>
           </Card>
         )}
 
-        {message.type === "chart" && message.chartData && (
+        {(message.type === "chart" || chartData) && (
           <div className="space-y-2">
             {message.content && (
-              <Card className="p-3 bg-zinc-800 text-gray-100 border-zinc-700">
+              <Card className="p-3 bg-muted text-muted-foreground">
                 <p className="text-sm">{message.content}</p>
               </Card>
             )}
-            <ChartCard
-              title={message.chartData.title}
-              description={message.chartData.description}
-              type={message.chartData.type}
-              data={message.chartData.data}
-              xAxisLabel={message.chartData.xAxisLabel}
-              yAxisLabel={message.chartData.yAxisLabel}
-            />
+            {chartData && (
+              <ChartCard
+                title={chartData.title || "Chart"}
+                description={chartData.description || "Data visualization"}
+                type={chartData.type || "bar"}
+                data={chartData.data || []}
+                xAxisLabel={chartData.xAxisLabel}
+                yAxisLabel={chartData.yAxisLabel}
+              />
+            )}
           </div>
         )}
 
-        {message.type === "diagram" && message.diagramData && (
+        {(message.type === "diagram" || diagramData) && (
           <div className="space-y-2">
             {message.content && (
-              <Card className="p-3 bg-zinc-800 text-gray-100 border-zinc-700">
+              <Card className="p-3 bg-muted text-muted-foreground">
                 <p className="text-sm">{message.content}</p>
               </Card>
             )}
-            <DiagramRenderer
-              title={message.diagramData.title}
-              type={message.diagramData.type}
-              code={message.diagramData.code}
-            />
+            {diagramData && (
+              <DiagramRenderer
+                title={diagramData.title || "Diagram"}
+                type={diagramData.type || "flowchart"}
+                code={diagramData.code || ""}
+              />
+            )}
           </div>
         )}
       </div>

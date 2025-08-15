@@ -34,6 +34,10 @@ export interface Message {
     url?: string
     data?: any
   }
+  chart_data?: any
+  diagram_data?: any
+  file_attachment?: any
+  created_at?: string
 }
 
 export interface Conversation {
@@ -48,6 +52,7 @@ export interface Conversation {
 
 interface ChatState {
   conversations: Conversation[]
+  messages: Message[]
   currentConversationId: string | null
   selectedChartType: ChartType
   isHomeView: boolean
@@ -59,11 +64,12 @@ interface ChatState {
   isDeletingFromSidebar: boolean
   isInitialized: boolean
 
-  loadConversations: () => Promise<Conversation[]>
+  loadConversations: (userId: string) => Promise<void>
+  loadMessages: (conversationId: string, userId: string) => Promise<void>
   addConversation: (title: string) => Promise<string>
   updateConversation: (id: string, updates: Partial<Conversation>) => Promise<void>
   deleteConversation: (id: string) => Promise<void>
-  addMessage: (conversationId: string, message: Message) => Promise<void>
+  addMessage: (message: Message) => void
   setCurrentConversationId: (id: string | null) => void
   setSelectedChartType: (type: ChartType) => void
   setIsHomeView: (isHome: boolean) => void
@@ -79,7 +85,6 @@ interface ChatState {
   initializeStore: () => Promise<void>
   setIsLoading: (loading: boolean) => void
   setSupabase: (client: SupabaseClient) => void
-
   getChartHistory: () => Conversation[]
 }
 
@@ -88,6 +93,7 @@ export const useConversationStore = create<ChatState>()(
     (set, get) => ({
       // State
       conversations: [],
+      messages: [],
       currentConversationId: null,
       selectedChartType: "bar",
       isHomeView: true,
@@ -101,32 +107,16 @@ export const useConversationStore = create<ChatState>()(
 
       // Actions
       setIsLoading: (loading) => set({ isLoading: loading }),
-      loadConversations: async () => {
+
+      loadConversations: async (userId: string) => {
         try {
-          console.log("Loading conversations from database...")
-
-          // Get user first
-          const {
-            data: { user },
-            error: userError,
-          } = await supabase.auth.getUser()
-          if (userError) {
-            console.error("User error:", userError)
-            throw userError
-          }
-
-          if (!user) {
-            console.log("No authenticated user found")
-            set({ conversations: [], error: null })
-            return []
-          }
-
-          console.log("Loading conversations for user:", user.id)
+          console.log("Loading conversations for user:", userId)
+          set({ isLoading: true })
 
           const { data: conversationsData, error: conversationsError } = await supabase
             .from("conversations")
             .select("*")
-            .eq("user_id", user.id)
+            .eq("user_id", userId)
             .order("updated_at", { ascending: false })
 
           if (conversationsError) {
@@ -136,19 +126,47 @@ export const useConversationStore = create<ChatState>()(
 
           console.log("Loaded conversations:", conversationsData)
 
-          if (!conversationsData || conversationsData.length === 0) {
-            console.log("No conversations found")
-            set({ conversations: [], error: null })
-            return []
+          const conversations: Conversation[] = (conversationsData || []).map((conv) => ({
+            id: conv.id,
+            title: conv.title,
+            messages: [],
+            createdAt: new Date(conv.created_at),
+            updatedAt: new Date(conv.updated_at),
+            userId: conv.user_id,
+            isFavorite: conv.is_favorite || false,
+          }))
+
+          set({ conversations, error: null })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to load conversations"
+          console.error("Error in loadConversations:", error)
+          set({ error: errorMessage, conversations: [] })
+        } finally {
+          set({ isLoading: false })
+        }
+      },
+
+      loadMessages: async (conversationId: string, userId: string) => {
+        try {
+          console.log("Loading messages for conversation:", conversationId)
+          set({ isLoading: true })
+
+          // First verify the conversation belongs to the user
+          const { data: conversation, error: convError } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("id", conversationId)
+            .eq("user_id", userId)
+            .single()
+
+          if (convError || !conversation) {
+            throw new Error("Conversation not found or access denied")
           }
 
           const { data: messagesData, error: messagesError } = await supabase
             .from("messages")
             .select("*")
-            .in(
-              "conversation_id",
-              conversationsData.map((c) => c.id),
-            )
+            .eq("conversation_id", conversationId)
             .order("created_at", { ascending: true })
 
           if (messagesError) {
@@ -158,77 +176,49 @@ export const useConversationStore = create<ChatState>()(
 
           console.log("Loaded messages:", messagesData)
 
-          const conversations: Conversation[] = conversationsData.map((conv) => {
-            const conversationMessages =
-              messagesData
-                ?.filter((msg) => msg.conversation_id === conv.id)
-                .map((msg) => {
-                  console.log("Processing message:", msg)
+          const messages: Message[] = (messagesData || []).map((msg) => {
+            // Parse chart_data if it exists
+            let chartData = null
+            if (msg.chart_data) {
+              try {
+                chartData = typeof msg.chart_data === "string" ? JSON.parse(msg.chart_data) : msg.chart_data
+              } catch (e) {
+                console.error("Error parsing chart_data:", e)
+              }
+            }
 
-                  // Parse chart_data if it exists
-                  let chartData = null
-                  if (msg.chart_data) {
-                    try {
-                      chartData = typeof msg.chart_data === "string" ? JSON.parse(msg.chart_data) : msg.chart_data
-                      console.log("Parsed chart data:", chartData)
-                    } catch (e) {
-                      console.error("Error parsing chart_data:", e, msg.chart_data)
-                    }
-                  }
-
-                  // Parse diagram_data if it exists
-                  let diagramData = null
-                  if (msg.diagram_data) {
-                    try {
-                      diagramData =
-                        typeof msg.diagram_data === "string" ? JSON.parse(msg.diagram_data) : msg.diagram_data
-                    } catch (e) {
-                      console.error("Error parsing diagram_data:", e)
-                    }
-                  }
-
-                  // Parse file_attachment if it exists
-                  let fileAttachment = null
-                  if (msg.file_attachment) {
-                    try {
-                      fileAttachment =
-                        typeof msg.file_attachment === "string" ? JSON.parse(msg.file_attachment) : msg.file_attachment
-                    } catch (e) {
-                      console.error("Error parsing file_attachment:", e)
-                    }
-                  }
-
-                  return {
-                    id: msg.id,
-                    content: msg.content || "",
-                    type: (msg.type as MessageType) || "text",
-                    role: (msg.role as "user" | "assistant") || "user",
-                    chartData,
-                    diagramData,
-                    fileAttachment,
-                    createdAt: new Date(msg.created_at),
-                  }
-                }) || []
+            // Parse diagram_data if it exists
+            let diagramData = null
+            if (msg.diagram_data) {
+              try {
+                diagramData = typeof msg.diagram_data === "string" ? JSON.parse(msg.diagram_data) : msg.diagram_data
+              } catch (e) {
+                console.error("Error parsing diagram_data:", e)
+              }
+            }
 
             return {
-              id: conv.id,
-              title: conv.title,
-              messages: conversationMessages,
-              createdAt: new Date(conv.created_at),
-              updatedAt: new Date(conv.updated_at),
-              userId: conv.user_id,
-              isFavorite: conv.is_favorite || false,
+              id: msg.id,
+              content: msg.content || "",
+              type: (msg.type as MessageType) || "text",
+              role: (msg.role as "user" | "assistant") || "user",
+              chartData,
+              diagramData,
+              createdAt: new Date(msg.created_at),
+              chart_data: msg.chart_data,
+              diagram_data: msg.diagram_data,
+              file_attachment: msg.file_attachment,
+              created_at: msg.created_at,
             }
           })
 
-          console.log("Final conversations:", conversations)
-          set({ conversations, error: null })
-          return conversations
+          set({ messages, currentConversationId: conversationId, error: null })
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to load conversations"
-          console.error("Error in loadConversations:", error)
-          set({ error: errorMessage, conversations: [] })
-          throw error
+          const errorMessage = error instanceof Error ? error.message : "Failed to load messages"
+          console.error("Error in loadMessages:", error)
+          set({ error: errorMessage, messages: [] })
+        } finally {
+          set({ isLoading: false })
         }
       },
 
@@ -341,63 +331,10 @@ export const useConversationStore = create<ChatState>()(
         }
       },
 
-      addMessage: async (conversationId, message) => {
-        try {
-          console.log("Adding message to database:", message)
-
-          // Prepare data for database
-          const messageData = {
-            id: message.id,
-            conversation_id: conversationId,
-            content: message.content,
-            type: message.type,
-            role: message.role,
-            chart_data: message.chartData ? JSON.stringify(message.chartData) : null,
-            diagram_data: message.diagramData ? JSON.stringify(message.diagramData) : null,
-            file_attachment: message.fileAttachment ? JSON.stringify(message.fileAttachment) : null,
-            created_at: message.createdAt.toISOString(),
-          }
-
-          console.log("Message data for database:", messageData)
-
-          const { error } = await supabase.from("messages").insert(messageData)
-
-          if (error) {
-            console.error("Database insert error:", error)
-            throw error
-          }
-
-          // Update conversation's updated_at timestamp
-          const { error: updateError } = await supabase
-            .from("conversations")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("id", conversationId)
-
-          if (updateError) {
-            console.error("Error updating conversation timestamp:", updateError)
-          }
-
-          // Update local state
-          set((state) => ({
-            conversations: state.conversations.map((conv) =>
-              conv.id === conversationId
-                ? {
-                    ...conv,
-                    messages: [...conv.messages, message],
-                    updatedAt: new Date(),
-                  }
-                : conv,
-            ),
-            error: null,
-          }))
-
-          console.log("Message added successfully")
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to add message"
-          console.error("Error in addMessage:", error)
-          set({ error: errorMessage })
-          throw error
-        }
+      addMessage: (message: Message) => {
+        set((state) => ({
+          messages: [...state.messages, message],
+        }))
       },
 
       setCurrentConversationId: (id) => set({ currentConversationId: id, isHomeView: !id }),
@@ -497,7 +434,6 @@ export const useConversationStore = create<ChatState>()(
             throw new Error("No active session")
           }
 
-          await get().loadConversations()
           set({ isInitialized: true })
         } catch (error) {
           console.error("Failed to initialize store:", error)
