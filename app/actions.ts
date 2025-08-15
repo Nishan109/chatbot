@@ -164,16 +164,16 @@ export async function generateResponse(message: string, chartType?: string) {
     // Prepare the prompt
     const prompt = `${getSystemPrompt(chartType)}\n\n${message}`
 
-    // Try with gemini-1.5-pro-latest first
+    // Try with gemini-2.0-flash-exp first, then fallback to gemini-1.5-flash
     let text: string | undefined
     try {
-      text = await generateWithModel("gemini-1.5-pro-latest", prompt)
-      console.log("Successfully used gemini-1.5-pro-latest")
+      text = await generateWithModel("gemini-2.0-flash-exp", prompt)
+      console.log("Successfully used gemini-2.0-flash-exp")
     } catch (error) {
-      console.log("Falling back to gemini-pro due to error:", error)
-      // Fall back to gemini-pro if 1.5 fails
-      text = await generateWithModel("gemini-pro", prompt)
-      console.log("Successfully used gemini-pro fallback")
+      console.log("Falling back to gemini-1.5-flash due to error:", error)
+      // Fall back to gemini-1.5-flash if 2.0 fails
+      text = await generateWithModel("gemini-1.5-flash", prompt)
+      console.log("Successfully used gemini-1.5-flash fallback")
     }
 
     if (!text?.trim()) {

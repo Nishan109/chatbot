@@ -23,6 +23,7 @@ import {
   Grid,
   Settings2,
   Star,
+  AlertTriangle,
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -30,6 +31,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface ComparisonData {
   feature: string
@@ -52,6 +54,7 @@ export function AIComparisonForm() {
   const [prompt, setPrompt] = React.useState("")
   const [viewMode, setViewMode] = React.useState<"table" | "chart" | "grid">("table")
   const [autoSave, setAutoSave] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
   const [generatedData, setGeneratedData] = React.useState<{
     title: string
     products: string[]
@@ -81,9 +84,13 @@ export function AIComparisonForm() {
 
   // Load saved comparisons from localStorage on mount
   React.useEffect(() => {
-    const saved = localStorage.getItem("savedComparisons")
-    if (saved) {
-      setSavedComparisons(JSON.parse(saved))
+    try {
+      const saved = localStorage.getItem("savedComparisons")
+      if (saved) {
+        setSavedComparisons(JSON.parse(saved))
+      }
+    } catch (err) {
+      console.error("Error loading saved comparisons:", err)
     }
   }, [])
 
@@ -98,6 +105,8 @@ export function AIComparisonForm() {
     }
 
     setLoading(true)
+    setError(null)
+
     try {
       const response = await fetch("/api/generate-comparison", {
         method: "POST",
@@ -107,24 +116,33 @@ export function AIComparisonForm() {
         body: JSON.stringify({ prompt }),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error("Failed to generate comparison")
+        throw new Error(data.error || "Failed to generate comparison")
       }
 
-      const data = await response.json()
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
       setGeneratedData(data)
 
       if (autoSave) {
         // Save to history
-        const newComparison: SavedComparison = {
-          id: Date.now().toString(),
-          prompt,
-          data,
-          createdAt: new Date().toISOString(),
+        try {
+          const newComparison: SavedComparison = {
+            id: Date.now().toString(),
+            prompt,
+            data,
+            createdAt: new Date().toISOString(),
+          }
+          const updatedComparisons = [newComparison, ...savedComparisons].slice(0, 10) // Keep last 10
+          setSavedComparisons(updatedComparisons)
+          localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
+        } catch (err) {
+          console.error("Error saving comparison to history:", err)
         }
-        const updatedComparisons = [newComparison, ...savedComparisons].slice(0, 10) // Keep last 10
-        setSavedComparisons(updatedComparisons)
-        localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
       }
 
       toast({
@@ -132,9 +150,11 @@ export function AIComparisonForm() {
         description: "Comparison table generated successfully",
       })
     } catch (error) {
+      console.error("Comparison generation error:", error)
+      setError(error instanceof Error ? error.message : "Failed to generate comparison. Please try again.")
       toast({
         title: "Error",
-        description: "Failed to generate comparison. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to generate comparison. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -145,31 +165,50 @@ export function AIComparisonForm() {
   const loadSavedComparison = (saved: SavedComparison) => {
     setPrompt(saved.prompt)
     setGeneratedData(saved.data)
+    setError(null)
   }
 
   const deleteSavedComparison = (id: string) => {
-    const updatedComparisons = savedComparisons.filter((c) => c.id !== id)
-    setSavedComparisons(updatedComparisons)
-    localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
-    toast({
-      title: "Deleted",
-      description: "Comparison removed from history",
-    })
+    try {
+      const updatedComparisons = savedComparisons.filter((c) => c.id !== id)
+      setSavedComparisons(updatedComparisons)
+      localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
+      toast({
+        title: "Deleted",
+        description: "Comparison removed from history",
+      })
+    } catch (err) {
+      console.error("Error deleting comparison:", err)
+      toast({
+        title: "Error",
+        description: "Failed to delete comparison",
+        variant: "destructive",
+      })
+    }
   }
 
   const exportComparison = () => {
     if (!generatedData) return
 
-    const jsonString = JSON.stringify(generatedData, null, 2)
-    const blob = new Blob([jsonString], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `comparison-${Date.now()}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    try {
+      const jsonString = JSON.stringify(generatedData, null, 2)
+      const blob = new Blob([jsonString], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `comparison-${Date.now()}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Error exporting comparison:", err)
+      toast({
+        title: "Error",
+        description: "Failed to export comparison",
+        variant: "destructive",
+      })
+    }
   }
 
   const copyToClipboard = async () => {
@@ -182,6 +221,7 @@ export function AIComparisonForm() {
         description: "Comparison data copied to clipboard",
       })
     } catch (err) {
+      console.error("Error copying to clipboard:", err)
       toast({
         title: "Error",
         description: "Failed to copy to clipboard",
@@ -330,6 +370,14 @@ export function AIComparisonForm() {
               </Tabs>
             </CardContent>
           </Card>
+
+          {error && (
+            <Alert variant="destructive" className="bg-red-900/50 border-red-500/50">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <AnimatePresence mode="wait">
             {generatedData && (

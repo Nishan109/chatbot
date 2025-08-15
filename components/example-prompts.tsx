@@ -130,7 +130,7 @@ export function ExamplePrompts({ onPromptSelect, isComparison = false }: Example
           clearInterval(typingInterval)
           setIsTyping(false)
         }
-      }, 30)
+      }, 50)
 
       return () => clearInterval(typingInterval)
     }
@@ -170,10 +170,10 @@ export function ExamplePrompts({ onPromptSelect, isComparison = false }: Example
     <div className="space-y-6">
       <div className="flex flex-col space-y-4">
         <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-semibold text-white">
+          <h2 className="text-2xl font-semibold text-white font-poppins">
             {isComparison ? "AI-Powered Comparison Generator" : "Try these examples"}
           </h2>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-zinc-400 font-poppins">
             {isComparison
               ? "Generate detailed comparisons using Gemini AI"
               : "Create beautiful charts with natural language"}
@@ -220,7 +220,7 @@ export function ExamplePrompts({ onPromptSelect, isComparison = false }: Example
           transition={{ duration: 0.3 }}
         >
           <Card className="relative p-6 bg-zinc-900/50 border-zinc-800/50 backdrop-blur-sm">
-            <p className="text-lg text-zinc-200 min-h-[60px] mb-4">
+            <p className="text-lg text-zinc-200 min-h-[60px] mb-4 font-poppins">
               {currentPrompt}
               {isTyping && <span className="animate-cursor-blink">|</span>}
             </p>

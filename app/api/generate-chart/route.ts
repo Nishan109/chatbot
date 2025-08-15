@@ -6,7 +6,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 export async function POST(req: Request) {
   try {
     const { prompt, chartType } = await req.json()
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" })
 
     let systemPrompt = ""
     if (chartType === "scatter") {

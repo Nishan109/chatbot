@@ -16,6 +16,7 @@ import {
   Loader2,
   Package,
   ArrowLeftRight,
+  Database,
 } from "lucide-react"
 import { useConversationStore } from "@/lib/store"
 import { motion, AnimatePresence } from "framer-motion"
@@ -24,13 +25,21 @@ import { RenameDialog } from "./rename-dialog"
 import { DeleteDialog } from "./delete-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
-// Product section with just comparison
-const productSection = {
-  id: "comparison",
-  name: "Comparison",
-  icon: ArrowLeftRight,
-  path: "/comparison",
-}
+// Product sections with comparison and data analysis
+const productSections = [
+  {
+    id: "comparison",
+    name: "Comparison",
+    icon: ArrowLeftRight,
+    path: "/comparison",
+  },
+  {
+    id: "data-analysis",
+    name: "Data Analysis",
+    icon: Database,
+    path: "/data-analysis",
+  },
+]
 
 interface SidebarProps {
   className?: string
@@ -157,7 +166,7 @@ export function Sidebar({ className, closeMobileNav }: SidebarProps) {
     if (selectedConversation) {
       try {
         await deleteConversation(selectedConversation)
-        setIsDeleteDialogOpen(false) // Close the dialog after successful deletion
+        setIsDeleteDialogOpen(false)
         setSelectedConversation(null)
       } catch (error) {
         console.error("Delete error:", error)
@@ -166,7 +175,7 @@ export function Sidebar({ className, closeMobileNav }: SidebarProps) {
           description: error instanceof Error ? error.message : "Failed to delete chart",
           variant: "destructive",
         })
-        setIsDeleteDialogOpen(false) // Close the dialog even if there's an error
+        setIsDeleteDialogOpen(false)
         setSelectedConversation(null)
       }
     }
@@ -283,17 +292,20 @@ export function Sidebar({ className, closeMobileNav }: SidebarProps) {
                     transition={{ duration: 0.2 }}
                     className="pl-4 space-y-1"
                   >
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-start text-sm hover:bg-zinc-800 transition-all duration-200"
-                      onClick={() => {
-                        router.push(productSection.path)
-                        closeMobileNav?.()
-                      }}
-                    >
-                      <productSection.icon className="mr-2 h-4 w-4" />
-                      {productSection.name}
-                    </Button>
+                    {productSections.map((section) => (
+                      <Button
+                        key={section.id}
+                        variant="ghost"
+                        className="w-full justify-start text-sm hover:bg-zinc-800 transition-all duration-200"
+                        onClick={() => {
+                          router.push(section.path)
+                          closeMobileNav?.()
+                        }}
+                      >
+                        <section.icon className="mr-2 h-4 w-4" />
+                        {section.name}
+                      </Button>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
