@@ -124,6 +124,25 @@ function generateFallbackChartData(prompt: string) {
   }
 }
 
+// Get available API key
+function getApiKey(): string | null {
+  // Check for Google/Gemini API keys in different environment variable names
+  const possibleKeys = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    process.env.GOOGLE_AI_API_KEY,
+  ]
+
+  for (const key of possibleKeys) {
+    if (key && key.trim()) {
+      return key.trim()
+    }
+  }
+
+  return null
+}
+
 export async function generateResponse(prompt: string, chartType?: string) {
   try {
     console.log("Generating response for prompt:", prompt)
@@ -132,64 +151,80 @@ export async function generateResponse(prompt: string, chartType?: string) {
     if (isChartRequest(prompt)) {
       console.log("Detected chart request")
 
-      try {
-        // Try to generate chart with AI
-        const result = await generateText({
-          model: google("gemini-2.0-flash-exp"),
-          prompt: `Create a chart based on this request: "${prompt}". 
-          
-          Respond with a JSON object containing:
-          - type: one of "bar", "line", "pie", "radar"
-          - title: descriptive title
-          - description: brief description
-          - data: array of objects with "name" and "value" properties
-          
-          Make the data realistic and relevant to the request. Only return valid JSON, no other text.`,
-          maxTokens: 1000,
-        })
+      // Get API key
+      const apiKey = getApiKey()
 
-        console.log("AI response:", result.text)
-
-        // Try to parse the AI response
-        let chartData
+      if (apiKey) {
         try {
-          // Clean the response text
-          let cleanedText = result.text.trim()
+          // Try to generate chart with AI
+          const result = await generateText({
+            model: google("gemini-2.0-flash-exp", { apiKey }),
+            prompt: `Create a chart based on this request: "${prompt}". 
+            
+            Respond with a JSON object containing:
+            - type: one of "bar", "line", "pie", "radar"
+            - title: descriptive title
+            - description: brief description
+            - data: array of objects with "name" and "value" properties
+            
+            Make the data realistic and relevant to the request. Only return valid JSON, no other text.`,
+            maxTokens: 1000,
+          })
 
-          // Remove markdown code blocks if present
-          if (cleanedText.startsWith("```json")) {
-            cleanedText = cleanedText.replace(/```json\n?/, "").replace(/\n?```$/, "")
-          } else if (cleanedText.startsWith("```")) {
-            cleanedText = cleanedText.replace(/```\n?/, "").replace(/\n?```$/, "")
+          console.log("AI response:", result.text)
+
+          // Try to parse the AI response
+          let chartData
+          try {
+            // Clean the response text
+            let cleanedText = result.text.trim()
+
+            // Remove markdown code blocks if present
+            if (cleanedText.startsWith("```json")) {
+              cleanedText = cleanedText.replace(/```json\n?/, "").replace(/\n?```$/, "")
+            } else if (cleanedText.startsWith("```")) {
+              cleanedText = cleanedText.replace(/```\n?/, "").replace(/\n?```$/, "")
+            }
+
+            // Try to find JSON in the response
+            const jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              cleanedText = jsonMatch[0]
+            }
+
+            chartData = JSON.parse(cleanedText)
+            console.log("Parsed chart data:", chartData)
+
+            // Validate the structure
+            if (!chartData.type || !chartData.title || !Array.isArray(chartData.data)) {
+              throw new Error("Invalid chart data structure")
+            }
+          } catch (parseError) {
+            console.log("Failed to parse AI response, using fallback data:", parseError)
+            chartData = generateFallbackChartData(prompt)
           }
 
-          // Try to find JSON in the response
-          const jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            cleanedText = jsonMatch[0]
+          return {
+            type: "chart" as const,
+            chartType: chartData.type,
+            title: chartData.title,
+            description: chartData.description || "Generated chart visualization",
+            data: chartData.data,
           }
+        } catch (aiError) {
+          console.log("AI generation failed, using fallback:", aiError)
+          const fallbackData = generateFallbackChartData(prompt)
 
-          chartData = JSON.parse(cleanedText)
-          console.log("Parsed chart data:", chartData)
-
-          // Validate the structure
-          if (!chartData.type || !chartData.title || !Array.isArray(chartData.data)) {
-            throw new Error("Invalid chart data structure")
+          return {
+            type: "chart" as const,
+            chartType: fallbackData.type,
+            title: fallbackData.title,
+            description: fallbackData.description,
+            data: fallbackData.data,
           }
-        } catch (parseError) {
-          console.log("Failed to parse AI response, using fallback data:", parseError)
-          chartData = generateFallbackChartData(prompt)
         }
-
-        return {
-          type: "chart" as const,
-          chartType: chartData.type,
-          title: chartData.title,
-          description: chartData.description || "Generated chart visualization",
-          data: chartData.data,
-        }
-      } catch (aiError) {
-        console.log("AI generation failed, using fallback:", aiError)
+      } else {
+        console.log("No API key available, using fallback data")
         const fallbackData = generateFallbackChartData(prompt)
 
         return {
@@ -205,28 +240,39 @@ export async function generateResponse(prompt: string, chartType?: string) {
     // For non-chart requests, generate text response
     console.log("Generating text response")
 
-    try {
-      const result = await generateText({
-        model: google("gemini-2.0-flash-exp"),
-        prompt: `You are a helpful AI assistant. Respond to this message: "${prompt}"
-        
-        Keep your response concise and helpful. If the user is asking about data visualization or charts, 
-        suggest they use more specific chart-related keywords in their request.`,
-        maxTokens: 500,
-      })
+    const apiKey = getApiKey()
 
-      return {
-        type: "text" as const,
-        content: result.text,
+    if (apiKey) {
+      try {
+        const result = await generateText({
+          model: google("gemini-2.0-flash-exp", { apiKey }),
+          prompt: `You are a helpful AI assistant. Respond to this message: "${prompt}"
+          
+          Keep your response concise and helpful. If the user is asking about data visualization or charts, 
+          suggest they use more specific chart-related keywords in their request.`,
+          maxTokens: 500,
+        })
+
+        return {
+          type: "text" as const,
+          content: result.text,
+        }
+      } catch (textError) {
+        console.error("Text generation failed:", textError)
+
+        // Fallback text response
+        return {
+          type: "text" as const,
+          content:
+            "I understand you're looking for assistance. Could you please provide more details about what you'd like me to help you with? If you're interested in creating charts or visualizations, try using keywords like 'chart', 'graph', or 'visualize' in your request.",
+        }
       }
-    } catch (textError) {
-      console.error("Text generation failed:", textError)
-
-      // Fallback text response
+    } else {
+      // No API key available, provide helpful fallback
       return {
         type: "text" as const,
         content:
-          "I understand you're looking for assistance. Could you please provide more details about what you'd like me to help you with? If you're interested in creating charts or visualizations, try using keywords like 'chart', 'graph', or 'visualize' in your request.",
+          "I'm a chart and data visualization assistant. To create charts, try prompts like 'create a bar chart of sales data' or 'show me a pie chart of market share'. I can generate various types of visualizations based on your requests.",
       }
     }
   } catch (error) {
