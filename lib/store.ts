@@ -366,18 +366,28 @@ export const useConversationStore = create<ChatState>()(
           if (userError) throw userError
           if (!user) throw new Error("No authenticated user")
 
-          // Prepare data for database
-          const messageData = {
+          // Prepare data for database - only include columns that exist
+          const messageData: any = {
             id: message.id,
             conversation_id: conversationId,
             user_id: user.id,
             content: message.content,
             type: message.type,
             role: message.role,
-            chart_data: message.chartData ? JSON.stringify(message.chartData) : null,
-            diagram_data: message.diagramData ? JSON.stringify(message.diagramData) : null,
-            file_attachment: message.fileAttachment ? JSON.stringify(message.fileAttachment) : null,
             created_at: message.createdAt.toISOString(),
+          }
+
+          // Only add optional columns if they have data
+          if (message.chartData) {
+            messageData.chart_data = message.chartData
+          }
+
+          if (message.diagramData) {
+            messageData.diagram_data = message.diagramData
+          }
+
+          if (message.fileAttachment) {
+            messageData.file_attachment = message.fileAttachment
           }
 
           console.log("Message data for database:", messageData)

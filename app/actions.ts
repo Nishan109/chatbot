@@ -3,22 +3,7 @@
 import { generateText } from "ai"
 import { google } from "@ai-sdk/google"
 
-// Chart response interface
-export interface ChartResponse {
-  success: boolean
-  chartData?: {
-    type: "bar" | "line" | "pie" | "radar"
-    title: string
-    description: string
-    data: any[]
-    xAxisLabel?: string
-    yAxisLabel?: string
-  }
-  message?: string
-  error?: string
-}
-
-// Function to detect if user wants to create a chart
+// Chart detection function
 function isChartRequest(prompt: string): boolean {
   const chartKeywords = [
     "chart",
@@ -27,219 +12,231 @@ function isChartRequest(prompt: string): boolean {
     "visualize",
     "visualization",
     "data",
-    "bar chart",
-    "line chart",
-    "pie chart",
-    "scatter plot",
+    "bar",
+    "line",
+    "pie",
+    "scatter",
     "histogram",
-    "dashboard",
-    "analytics",
-    "metrics",
-    "trends",
+    "area",
+    "bubble",
+    "radar",
+    "polar",
+    "donut",
+    "treemap",
+    "heatmap",
+    "funnel",
+    "show",
+    "display",
+    "create",
+    "generate",
+    "make",
+    "draw",
+    "render",
+    "build",
+    "analyze",
     "compare",
-    "comparison",
+    "trend",
+    "distribution",
+    "correlation",
+    "sales",
+    "revenue",
+    "profit",
+    "growth",
+    "performance",
+    "metrics",
     "statistics",
     "stats",
-    "report",
-    "analysis",
-    "analyze",
+    "numbers",
+    "values",
+    "dataset",
   ]
 
   const lowerPrompt = prompt.toLowerCase()
   return chartKeywords.some((keyword) => lowerPrompt.includes(keyword))
 }
 
-// Generate fallback chart data based on context
-function generateFallbackData(prompt: string) {
+// Generate fallback chart data based on prompt
+function generateFallbackChartData(prompt: string) {
   const lowerPrompt = prompt.toLowerCase()
 
+  // Sales/Revenue data
   if (lowerPrompt.includes("sales") || lowerPrompt.includes("revenue")) {
     return {
       type: "bar" as const,
-      title: "Monthly Sales Data",
-      description: "Sales performance over the last 6 months",
+      title: "Monthly Sales Performance",
+      description: "Sales data showing monthly performance trends",
       data: [
-        { month: "Jan", sales: 12000 },
-        { month: "Feb", sales: 15000 },
-        { month: "Mar", sales: 18000 },
-        { month: "Apr", sales: 14000 },
-        { month: "May", sales: 22000 },
-        { month: "Jun", sales: 25000 },
+        { name: "Jan", value: 45000 },
+        { name: "Feb", value: 52000 },
+        { name: "Mar", value: 48000 },
+        { name: "Apr", value: 61000 },
+        { name: "May", value: 55000 },
+        { name: "Jun", value: 67000 },
       ],
-      xAxisLabel: "Month",
-      yAxisLabel: "Sales ($)",
     }
   }
 
-  if (lowerPrompt.includes("user") || lowerPrompt.includes("growth")) {
+  // Growth/Performance data
+  if (lowerPrompt.includes("growth") || lowerPrompt.includes("performance")) {
     return {
       type: "line" as const,
-      title: "User Growth",
-      description: "Monthly active users over time",
+      title: "Growth Performance Over Time",
+      description: "Performance metrics showing growth trends",
       data: [
-        { month: "Jan", users: 1000 },
-        { month: "Feb", users: 1200 },
-        { month: "Mar", users: 1500 },
-        { month: "Apr", users: 1800 },
-        { month: "May", users: 2200 },
-        { month: "Jun", users: 2800 },
+        { name: "Q1", value: 15 },
+        { name: "Q2", value: 23 },
+        { name: "Q3", value: 18 },
+        { name: "Q4", value: 31 },
+        { name: "Q5", value: 28 },
+        { name: "Q6", value: 35 },
       ],
-      xAxisLabel: "Month",
-      yAxisLabel: "Active Users",
     }
   }
 
-  // Default fallback
+  // Market share or distribution
+  if (lowerPrompt.includes("market") || lowerPrompt.includes("share") || lowerPrompt.includes("pie")) {
+    return {
+      type: "pie" as const,
+      title: "Market Share Distribution",
+      description: "Market share breakdown by category",
+      data: [
+        { name: "Product A", value: 35 },
+        { name: "Product B", value: 25 },
+        { name: "Product C", value: 20 },
+        { name: "Product D", value: 15 },
+        { name: "Others", value: 5 },
+      ],
+    }
+  }
+
+  // Default chart data
   return {
     type: "bar" as const,
     title: "Sample Data Visualization",
-    description: "Example chart based on your request",
+    description: "Generated chart based on your request",
     data: [
-      { category: "A", value: 30 },
-      { category: "B", value: 45 },
-      { category: "C", value: 25 },
-      { category: "D", value: 60 },
-      { category: "E", value: 35 },
+      { name: "Category A", value: 65 },
+      { name: "Category B", value: 78 },
+      { name: "Category C", value: 52 },
+      { name: "Category D", value: 91 },
+      { name: "Category E", value: 43 },
     ],
-    xAxisLabel: "Category",
-    yAxisLabel: "Value",
   }
 }
 
-// Extract JSON from AI response
-function extractJSON(text: string): any {
-  try {
-    // Try to parse the entire response as JSON
-    return JSON.parse(text)
-  } catch {
-    // Look for JSON blocks in the response
-    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/```\s*([\s\S]*?)\s*```/)
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[1])
-      } catch {
-        // Continue to next attempt
-      }
-    }
-
-    // Look for JSON-like structures
-    const jsonStart = text.indexOf("{")
-    const jsonEnd = text.lastIndexOf("}")
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-      try {
-        return JSON.parse(text.slice(jsonStart, jsonEnd + 1))
-      } catch {
-        // Continue to next attempt
-      }
-    }
-
-    throw new Error("No valid JSON found in response")
-  }
-}
-
-export async function generateResponse(prompt: string): Promise<ChartResponse> {
+export async function generateResponse(prompt: string, chartType?: string) {
   try {
     console.log("Generating response for prompt:", prompt)
 
     // Check if this is a chart request
-    if (!isChartRequest(prompt)) {
-      return {
-        success: false,
-        message: "This doesn't appear to be a chart request. Please ask for a chart, graph, or data visualization.",
-        error: "Not a chart request",
-      }
-    }
+    if (isChartRequest(prompt)) {
+      console.log("Detected chart request")
 
-    const chartPrompt = `
-You are a data visualization expert. Create a chart based on this request: "${prompt}"
-
-Respond with ONLY a JSON object in this exact format:
-{
-  "type": "bar|line|pie|radar",
-  "title": "Chart Title",
-  "description": "Brief description",
-  "data": [
-    {"category": "value1", "value": number},
-    {"category": "value2", "value": number}
-  ],
-  "xAxisLabel": "X Axis Label",
-  "yAxisLabel": "Y Axis Label"
-}
-
-Make the data realistic and relevant to the request. Use appropriate chart type for the data.
-`
-
-    // Try different Gemini models in order of preference
-    const models = [google("gemini-2.0-flash-exp"), google("gemini-1.5-flash"), google("gemini-1.5-pro")]
-
-    let lastError: Error | null = null
-
-    for (const model of models) {
       try {
-        console.log(`Trying model: ${model.modelId}`)
-
-        const { text } = await generateText({
-          model,
-          prompt: chartPrompt,
+        // Try to generate chart with AI
+        const result = await generateText({
+          model: google("gemini-2.0-flash-exp"),
+          prompt: `Create a chart based on this request: "${prompt}". 
+          
+          Respond with a JSON object containing:
+          - type: one of "bar", "line", "pie", "radar"
+          - title: descriptive title
+          - description: brief description
+          - data: array of objects with "name" and "value" properties
+          
+          Make the data realistic and relevant to the request. Only return valid JSON, no other text.`,
           maxTokens: 1000,
-          temperature: 0.7,
         })
 
-        console.log("AI Response:", text)
+        console.log("AI response:", result.text)
 
-        // Extract and parse JSON from response
-        const chartData = extractJSON(text)
+        // Try to parse the AI response
+        let chartData
+        try {
+          // Clean the response text
+          let cleanedText = result.text.trim()
 
-        // Validate the response structure
-        if (!chartData.type || !chartData.title || !chartData.data) {
-          throw new Error("Invalid chart data structure")
+          // Remove markdown code blocks if present
+          if (cleanedText.startsWith("```json")) {
+            cleanedText = cleanedText.replace(/```json\n?/, "").replace(/\n?```$/, "")
+          } else if (cleanedText.startsWith("```")) {
+            cleanedText = cleanedText.replace(/```\n?/, "").replace(/\n?```$/, "")
+          }
+
+          // Try to find JSON in the response
+          const jsonMatch = cleanedText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            cleanedText = jsonMatch[0]
+          }
+
+          chartData = JSON.parse(cleanedText)
+          console.log("Parsed chart data:", chartData)
+
+          // Validate the structure
+          if (!chartData.type || !chartData.title || !Array.isArray(chartData.data)) {
+            throw new Error("Invalid chart data structure")
+          }
+        } catch (parseError) {
+          console.log("Failed to parse AI response, using fallback data:", parseError)
+          chartData = generateFallbackChartData(prompt)
         }
-
-        console.log("Successfully generated chart data:", chartData)
 
         return {
-          success: true,
-          chartData: {
-            type: chartData.type,
-            title: chartData.title,
-            description: chartData.description || "Generated chart",
-            data: chartData.data,
-            xAxisLabel: chartData.xAxisLabel,
-            yAxisLabel: chartData.yAxisLabel,
-          },
+          type: "chart" as const,
+          chartType: chartData.type,
+          title: chartData.title,
+          description: chartData.description || "Generated chart visualization",
+          data: chartData.data,
         }
-      } catch (error) {
-        console.error(`Error with model ${model.modelId}:`, error)
-        lastError = error instanceof Error ? error : new Error(String(error))
-        continue
+      } catch (aiError) {
+        console.log("AI generation failed, using fallback:", aiError)
+        const fallbackData = generateFallbackChartData(prompt)
+
+        return {
+          type: "chart" as const,
+          chartType: fallbackData.type,
+          title: fallbackData.title,
+          description: fallbackData.description,
+          data: fallbackData.data,
+        }
       }
     }
 
-    // If all models failed, use fallback data
-    console.log("All AI models failed, using fallback data")
-    const fallbackData = generateFallbackData(prompt)
+    // For non-chart requests, generate text response
+    console.log("Generating text response")
 
-    return {
-      success: true,
-      chartData: fallbackData,
-      message: "Generated using fallback data due to AI service limitations",
+    try {
+      const result = await generateText({
+        model: google("gemini-2.0-flash-exp"),
+        prompt: `You are a helpful AI assistant. Respond to this message: "${prompt}"
+        
+        Keep your response concise and helpful. If the user is asking about data visualization or charts, 
+        suggest they use more specific chart-related keywords in their request.`,
+        maxTokens: 500,
+      })
+
+      return {
+        type: "text" as const,
+        content: result.text,
+      }
+    } catch (textError) {
+      console.error("Text generation failed:", textError)
+
+      // Fallback text response
+      return {
+        type: "text" as const,
+        content:
+          "I understand you're looking for assistance. Could you please provide more details about what you'd like me to help you with? If you're interested in creating charts or visualizations, try using keywords like 'chart', 'graph', or 'visualize' in your request.",
+      }
     }
   } catch (error) {
     console.error("Error in generateResponse:", error)
 
-    // Return fallback data even on complete failure
-    const fallbackData = generateFallbackData(prompt)
-
+    // Ultimate fallback
     return {
-      success: true,
-      chartData: fallbackData,
-      message: "Generated using fallback data",
-      error: error instanceof Error ? error.message : "Unknown error",
+      type: "text" as const,
+      content:
+        "I apologize, but I encountered an error while processing your request. Please try again with a different prompt.",
     }
   }
-}
-
-// Legacy function for backward compatibility
-export async function generateChart(prompt: string) {
-  return generateResponse(prompt)
 }
