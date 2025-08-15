@@ -24,7 +24,7 @@ export function SignIn() {
   }
 
   return (
-    <Card className="w-[350px] rounded-lg overflow-hidden">
+    <Card className="w-[350px]">
       <CardHeader>
         <CardTitle>{isSignUp ? "Sign Up" : "Sign In"}</CardTitle>
         <CardDescription>
@@ -34,37 +34,25 @@ export function SignIn() {
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <label htmlFor="email" className="text-sm font-medium">
-              Email
-            </label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="rounded-md"
-            />
+            <label htmlFor="email">Email</label>
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </div>
           <div className="space-y-2">
-            <label htmlFor="password" className="text-sm font-medium">
-              Password
-            </label>
+            <label htmlFor="password">Password</label>
             <Input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="rounded-md"
             />
           </div>
           {error && (
-            <Alert variant="destructive" className="rounded-md">
+            <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          <Button type="submit" className="w-full rounded-md" disabled={loading}>
+          <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSignUp ? "Sign Up" : "Sign In"}
           </Button>

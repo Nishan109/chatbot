@@ -8,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ComparisonTable } from "./comparison-table"
-import { ComparisonChartView } from "./comparison-chart-view"
 import {
   Wand2,
   Loader2,
@@ -24,9 +23,6 @@ import {
   Grid,
   Settings2,
   Star,
-  AlertTriangle,
-  RefreshCw,
-  Info,
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -34,7 +30,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface ComparisonData {
   feature: string
@@ -57,15 +52,12 @@ export function AIComparisonForm() {
   const [prompt, setPrompt] = React.useState("")
   const [viewMode, setViewMode] = React.useState<"table" | "chart" | "grid">("table")
   const [autoSave, setAutoSave] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
-  const [apiInfo, setApiInfo] = React.useState<string | null>(null)
   const [generatedData, setGeneratedData] = React.useState<{
     title: string
     products: string[]
     data: ComparisonData[]
   } | null>(null)
   const [savedComparisons, setSavedComparisons] = React.useState<SavedComparison[]>([])
-  const [retryCount, setRetryCount] = React.useState(0)
   const { toast } = useToast()
 
   // Refs for scroll handling
@@ -89,13 +81,9 @@ export function AIComparisonForm() {
 
   // Load saved comparisons from localStorage on mount
   React.useEffect(() => {
-    try {
-      const saved = localStorage.getItem("savedComparisons")
-      if (saved) {
-        setSavedComparisons(JSON.parse(saved))
-      }
-    } catch (err) {
-      console.error("Error loading saved comparisons:", err)
+    const saved = localStorage.getItem("savedComparisons")
+    if (saved) {
+      setSavedComparisons(JSON.parse(saved))
     }
   }, [])
 
@@ -110,79 +98,33 @@ export function AIComparisonForm() {
     }
 
     setLoading(true)
-    setError(null)
-    setApiInfo(null)
-
     try {
-      // First try to extract JSON from the prompt
-      if (tryExtractJsonFromPrompt()) {
-        setLoading(false)
-        setApiInfo("Used JSON data from prompt")
-        return
-      }
-
-      // Set a timeout to handle API timeouts
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
-
       const response = await fetch("/api/generate-comparison", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt, retryCount }),
-        signal: controller.signal,
+        body: JSON.stringify({ prompt }),
       })
 
-      clearTimeout(timeoutId)
-
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `HTTP error ${response.status}` }))
-        throw new Error(errorData.error || `HTTP error ${response.status}`)
+        throw new Error("Failed to generate comparison")
       }
 
-      let data
-      try {
-        data = await response.json()
-      } catch (jsonError) {
-        console.error("Error parsing JSON response:", jsonError)
-        throw new Error("Invalid JSON response from server")
-      }
-
-      if (data.error) {
-        throw new Error(data.error)
-      }
-
-      // Check for API source info
-      if (data.apiSource) {
-        setApiInfo(`Generated using ${data.apiSource}`)
-      } else {
-        setApiInfo("Generated using DeepSeek API")
-      }
-
-      // Validate the response structure
-      if (!data.title || !Array.isArray(data.products) || !Array.isArray(data.data)) {
-        throw new Error("Invalid response format")
-      }
-
+      const data = await response.json()
       setGeneratedData(data)
-      setRetryCount(0) // Reset retry count on success
 
       if (autoSave) {
         // Save to history
-        try {
-          const newComparison: SavedComparison = {
-            id: Date.now().toString(),
-            prompt,
-            data,
-            createdAt: new Date().toISOString(),
-          }
-          const updatedComparisons = [newComparison, ...savedComparisons].slice(0, 10) // Keep last 10
-          setSavedComparisons(updatedComparisons)
-          localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
-        } catch (err) {
-          console.error("Error saving comparison to history:", err)
+        const newComparison: SavedComparison = {
+          id: Date.now().toString(),
+          prompt,
+          data,
+          createdAt: new Date().toISOString(),
         }
+        const updatedComparisons = [newComparison, ...savedComparisons].slice(0, 10) // Keep last 10
+        setSavedComparisons(updatedComparisons)
+        localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
       }
 
       toast({
@@ -190,18 +132,9 @@ export function AIComparisonForm() {
         description: "Comparison table generated successfully",
       })
     } catch (error) {
-      console.error("Comparison generation error:", error)
-
-      // Handle AbortError (timeout)
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setError("Request timed out. The server took too long to respond. Please try again or use a simpler prompt.")
-      } else {
-        setError(error instanceof Error ? error.message : "Failed to generate comparison. Please try again.")
-      }
-
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to generate comparison. Please try again.",
+        description: "Failed to generate comparison. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -209,144 +142,34 @@ export function AIComparisonForm() {
     }
   }
 
-  // Function to try to extract JSON from the prompt if it contains JSON data
-  const tryExtractJsonFromPrompt = () => {
-    if (prompt.includes("{") && prompt.includes("}")) {
-      try {
-        // Try to find JSON in the prompt
-        const jsonMatch = prompt.match(/({[\s\S]*})/)
-        if (jsonMatch && jsonMatch[1]) {
-          const jsonStr = jsonMatch[1].replace(/^```json|```$/g, "").trim()
-          try {
-            const parsedJson = JSON.parse(jsonStr)
-
-            // If it's already in our expected format, use it
-            if (parsedJson.title && Array.isArray(parsedJson.products) && Array.isArray(parsedJson.data)) {
-              setGeneratedData(parsedJson)
-              return true
-            }
-
-            // If it's in a different format, try to convert it
-            if (parsedJson.type === "comparison" && Array.isArray(parsedJson.services)) {
-              // Convert from the format in the screenshot to our expected format
-              const products = parsedJson.services.map((service) => service.name)
-
-              // Extract features from the first service to use as rows
-              const features = []
-              if (parsedJson.services[0]) {
-                const firstService = parsedJson.services[0]
-                // Add compute as a feature
-                if (firstService.compute) features.push("Compute")
-                // Add storage as a feature
-                if (firstService.storage) features.push("Storage")
-                // Add database as a feature
-                if (firstService.database) features.push("Database")
-                // Add machine learning as a feature
-                if (firstService.machineLearning) features.push("Machine Learning")
-                // Add pricing model as a feature
-                features.push("Pricing Model")
-              }
-
-              // Create data rows
-              const data = features.map((feature) => {
-                const row = { feature }
-
-                // Add data for each product
-                parsedJson.services.forEach((service) => {
-                  if (feature === "Compute" && service.compute) {
-                    row[service.name] = `${service.compute.name}: ${service.compute.description}`
-                  } else if (feature === "Storage" && service.storage) {
-                    row[service.name] = `${service.storage.name}: ${service.storage.description}`
-                  } else if (feature === "Database" && service.database) {
-                    row[service.name] = `${service.database.name}: ${service.database.description}`
-                  } else if (feature === "Machine Learning" && service.machineLearning) {
-                    row[service.name] = `${service.machineLearning.name}: ${service.machineLearning.description}`
-                  } else if (feature === "Pricing Model") {
-                    row[service.name] = "Pay-as-you-go"
-                  } else {
-                    row[service.name] = "N/A"
-                  }
-                })
-
-                return row
-              })
-
-              setGeneratedData({
-                title: "Comparison of Cloud Services",
-                products,
-                data,
-              })
-              return true
-            }
-          } catch (parseError) {
-            console.error("Error parsing JSON from prompt:", parseError)
-          }
-        }
-      } catch (jsonError) {
-        console.error("Error extracting JSON from prompt:", jsonError)
-      }
-    }
-    return false
-  }
-
-  const handlePromptSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    await generateComparison()
-  }
-
-  const handleRetry = async () => {
-    setRetryCount((prev) => prev + 1)
-    await generateComparison()
-  }
-
   const loadSavedComparison = (saved: SavedComparison) => {
     setPrompt(saved.prompt)
     setGeneratedData(saved.data)
-    setError(null)
-    setApiInfo("Loaded from history")
   }
 
   const deleteSavedComparison = (id: string) => {
-    try {
-      const updatedComparisons = savedComparisons.filter((c) => c.id !== id)
-      setSavedComparisons(updatedComparisons)
-      localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
-      toast({
-        title: "Deleted",
-        description: "Comparison removed from history",
-      })
-    } catch (err) {
-      console.error("Error deleting comparison:", err)
-      toast({
-        title: "Error",
-        description: "Failed to delete comparison",
-        variant: "destructive",
-      })
-    }
+    const updatedComparisons = savedComparisons.filter((c) => c.id !== id)
+    setSavedComparisons(updatedComparisons)
+    localStorage.setItem("savedComparisons", JSON.stringify(updatedComparisons))
+    toast({
+      title: "Deleted",
+      description: "Comparison removed from history",
+    })
   }
 
   const exportComparison = () => {
     if (!generatedData) return
 
-    try {
-      const jsonString = JSON.stringify(generatedData, null, 2)
-      const blob = new Blob([jsonString], { type: "application/json" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `comparison-${Date.now()}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error("Error exporting comparison:", err)
-      toast({
-        title: "Error",
-        description: "Failed to export comparison",
-        variant: "destructive",
-      })
-    }
+    const jsonString = JSON.stringify(generatedData, null, 2)
+    const blob = new Blob([jsonString], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `comparison-${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   const copyToClipboard = async () => {
@@ -359,7 +182,6 @@ export function AIComparisonForm() {
         description: "Comparison data copied to clipboard",
       })
     } catch (err) {
-      console.error("Error copying to clipboard:", err)
       toast({
         title: "Error",
         description: "Failed to copy to clipboard",
@@ -415,7 +237,7 @@ export function AIComparisonForm() {
                     </div>
 
                     <Button
-                      onClick={handlePromptSubmit}
+                      onClick={generateComparison}
                       className="w-full bg-green-500/20 hover:bg-green-500/30 text-green-500"
                       disabled={loading}
                     >
@@ -509,20 +331,6 @@ export function AIComparisonForm() {
             </CardContent>
           </Card>
 
-          {error && (
-            <Alert variant="destructive" className="bg-red-900/50 border-red-500/50">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription className="flex flex-col gap-2">
-                <p>{error}</p>
-                <Button variant="outline" size="sm" className="self-start mt-2" onClick={handleRetry}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Retry with Fallback
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-
           <AnimatePresence mode="wait">
             {generatedData && (
               <motion.div
@@ -540,15 +348,7 @@ export function AIComparisonForm() {
               >
                 <Card className="bg-black/50 backdrop-blur-xl border-green-500/20">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <div>
-                      <CardTitle className="text-white">{generatedData.title}</CardTitle>
-                      {apiInfo && (
-                        <div className="flex items-center mt-1 text-xs text-muted-foreground">
-                          <Info className="h-3 w-3 mr-1" />
-                          {apiInfo}
-                        </div>
-                      )}
-                    </div>
+                    <CardTitle className="text-white">{generatedData.title}</CardTitle>
                     <div className="flex items-center gap-2">
                       <div className="flex items-center space-x-1 rounded-md border border-zinc-800 p-1">
                         <Tooltip>
@@ -633,11 +433,7 @@ export function AIComparisonForm() {
                       />
                     )}
                     {viewMode === "chart" && (
-                      <ComparisonChartView
-                        title={generatedData.title}
-                        data={generatedData.data}
-                        products={generatedData.products}
-                      />
+                      <div className="text-center py-8 text-muted-foreground">Chart view coming soon...</div>
                     )}
                     {viewMode === "grid" && (
                       <div className="text-center py-8 text-muted-foreground">Grid view coming soon...</div>

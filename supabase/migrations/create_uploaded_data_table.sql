@@ -33,6 +33,7 @@ CREATE POLICY "Users can insert own data"
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can only update their own data
+CREATE POLICY "Users can update own data"
   ON uploaded_data
   FOR UPDATE
   USING (auth.uid() = user_id);

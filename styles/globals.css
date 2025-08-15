@@ -23,7 +23,6 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 142.4 71.8% 29.2%;
-    --radius: 0.75rem;
   }
 }
 
@@ -34,42 +33,47 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  .animate-cursor-blink {
+    animation: cursor-blink 1s step-end infinite;
+  }
+
+  @keyframes cursor-blink {
+    from,
+    to {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
 }
 
-@keyframes gradient {
+/* Enhanced Animations */
+@keyframes float {
   0% {
-    background-position: 0% 50%;
+    transform: translateY(0px);
   }
   50% {
-    background-position: 100% 50%;
+    transform: translateY(-5px);
   }
   100% {
-    background-position: 0% 50%;
+    transform: translateY(0px);
   }
 }
 
-.animate-gradient {
-  background-size: 200% 200%;
-  animation: gradient 15s ease infinite;
-}
-
-@keyframes pulse-slow {
+@keyframes pulse {
   0% {
-    opacity: 0.4;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.6;
+    transform: scale(1.05);
   }
   100% {
-    opacity: 0.4;
+    transform: scale(1);
   }
 }
 
-.animate-pulse-slow {
-  animation: pulse-slow 4s ease-in-out infinite;
-}
-
-/* Enhanced Header Styles */
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -79,53 +83,235 @@
   }
 }
 
-.header-glow {
-  position: relative;
+.animate-float {
+  animation: float 3s ease-in-out infinite;
 }
 
-.header-glow::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  animation: shimmer 2s infinite;
+.animate-pulse-slow {
+  animation: pulse 3s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%);
   background-size: 200% 100%;
+  animation: shimmer 2s infinite;
 }
 
-/* Enhanced Badge Styles */
-.badge-glow {
-  box-shadow: 0 0 10px rgba(0, 255, 0, 0.1);
-  transition: all 0.2s ease;
+/* Enhanced Sheet Animations */
+@keyframes sheet-in {
+  0% {
+    transform: translateX(-100%) scale(0.95);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
 }
 
-.badge-glow:hover {
-  box-shadow: 0 0 15px rgba(0, 255, 0, 0.2);
+@keyframes sheet-out {
+  0% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-100%) scale(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+}
+
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+.sheet-overlay[data-state="open"] {
+  animation: overlay-in 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sheet-overlay[data-state="closed"] {
+  animation: overlay-out 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sheet-content[data-state="open"] {
+  animation: sheet-in 400ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.sheet-content[data-state="closed"] {
+  animation: sheet-out 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Responsive Hover Effects */
+@media (hover: hover) {
+  .hover-scale {
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .hover-scale:hover {
+    transform: scale(1.02);
+  }
+
+  .hover-lift {
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Touch Device Feedback */
+@media (hover: none) {
+  .touch-feedback:active {
+    transform: scale(0.98);
+    transition: transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
 }
 
 /* Custom Scrollbar */
+/* Enhanced Scrollbar Styles */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 255, 0, 0.1);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 0, 0.3);
+  background: hsl(var(--primary) / 0.3);
   border-radius: 3px;
+  transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 255, 0, 0.5);
+  background: hsl(var(--primary) / 0.5);
 }
 
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 255, 0, 0.3) rgba(0, 255, 0, 0.1);
+  scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+@layer utilities {
+  .scrollbar-custom {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary)) transparent;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--primary));
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--primary) / 0.8);
+  }
+
+  /* Hide scrollbar for mobile */
+  @media (max-width: 640px) {
+    .scrollbar-custom::-webkit-scrollbar {
+      display: none;
+    }
+    .scrollbar-custom {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  }
+}
+
+/* Loading Spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Gradient Text */
+.gradient-text {
+  background: linear-gradient(45deg, hsl(var(--primary)), hsl(var(--secondary)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hue-rotate 10s infinite linear;
+}
+
+@keyframes hue-rotate {
+  from {
+    filter: hue-rotate(0deg);
+  }
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+/* Ensure content is visible over the animated background */
+.content-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+/* Adjust text colors for better visibility */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: #e0e0e0;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+p,
+span,
+div {
+  color: #f0f0f0;
+}
+
+/* Add a subtle text shadow to improve readability */
+.text-shadow {
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
 }

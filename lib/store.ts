@@ -20,8 +20,6 @@ export interface Message {
     title: string
     description: string
     data: any[]
-    xAxisLabel?: string
-    yAxisLabel?: string
   }
   diagramData?: {
     type: string
@@ -34,10 +32,6 @@ export interface Message {
     url?: string
     data?: any
   }
-  chart_data?: any
-  diagram_data?: any
-  file_attachment?: any
-  created_at?: string
 }
 
 export interface Conversation {
@@ -52,7 +46,6 @@ export interface Conversation {
 
 interface ChatState {
   conversations: Conversation[]
-  messages: Message[]
   currentConversationId: string | null
   selectedChartType: ChartType
   isHomeView: boolean
@@ -64,12 +57,11 @@ interface ChatState {
   isDeletingFromSidebar: boolean
   isInitialized: boolean
 
-  loadConversations: (userId: string) => Promise<void>
-  loadMessages: (conversationId: string, userId: string) => Promise<void>
+  loadConversations: () => Promise<Conversation[]>
   addConversation: (title: string) => Promise<string>
   updateConversation: (id: string, updates: Partial<Conversation>) => Promise<void>
   deleteConversation: (id: string) => Promise<void>
-  addMessage: (message: Message) => void
+  addMessage: (conversationId: string, message: Message) => Promise<void>
   setCurrentConversationId: (id: string | null) => void
   setSelectedChartType: (type: ChartType) => void
   setIsHomeView: (isHome: boolean) => void
@@ -85,6 +77,7 @@ interface ChatState {
   initializeStore: () => Promise<void>
   setIsLoading: (loading: boolean) => void
   setSupabase: (client: SupabaseClient) => void
+
   getChartHistory: () => Conversation[]
 }
 
@@ -93,7 +86,6 @@ export const useConversationStore = create<ChatState>()(
     (set, get) => ({
       // State
       conversations: [],
-      messages: [],
       currentConversationId: null,
       selectedChartType: "bar",
       isHomeView: true,
@@ -107,29 +99,41 @@ export const useConversationStore = create<ChatState>()(
 
       // Actions
       setIsLoading: (loading) => set({ isLoading: loading }),
-
-      loadConversations: async (userId: string) => {
+      loadConversations: async () => {
         try {
-          console.log("Loading conversations for user:", userId)
-          set({ isLoading: true })
-
           const { data: conversationsData, error: conversationsError } = await supabase
             .from("conversations")
             .select("*")
-            .eq("user_id", userId)
             .order("updated_at", { ascending: false })
 
-          if (conversationsError) {
-            console.error("Conversations error:", conversationsError)
-            throw conversationsError
-          }
+          if (conversationsError) throw conversationsError
 
-          console.log("Loaded conversations:", conversationsData)
+          const { data: messagesData, error: messagesError } = await supabase
+            .from("messages")
+            .select("*")
+            .in(
+              "conversation_id",
+              conversationsData.map((c) => c.id),
+            )
+            .order("created_at", { ascending: true })
 
-          const conversations: Conversation[] = (conversationsData || []).map((conv) => ({
+          if (messagesError) throw messagesError
+
+          const conversations: Conversation[] = conversationsData.map((conv) => ({
             id: conv.id,
             title: conv.title,
-            messages: [],
+            messages: messagesData
+              .filter((msg) => msg.conversation_id === conv.id)
+              .map((msg) => ({
+                id: msg.id,
+                content: msg.content,
+                type: msg.type as MessageType,
+                role: msg.role as "user" | "assistant",
+                chartData: msg.chart_data,
+                diagramData: msg.diagram_data,
+                fileAttachment: msg.file_attachment,
+                createdAt: new Date(msg.created_at),
+              })),
             createdAt: new Date(conv.created_at),
             updatedAt: new Date(conv.updated_at),
             userId: conv.user_id,
@@ -137,127 +141,37 @@ export const useConversationStore = create<ChatState>()(
           }))
 
           set({ conversations, error: null })
+          return conversations
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Failed to load conversations"
           console.error("Error in loadConversations:", error)
           set({ error: errorMessage, conversations: [] })
-        } finally {
-          set({ isLoading: false })
-        }
-      },
-
-      loadMessages: async (conversationId: string, userId: string) => {
-        try {
-          console.log("Loading messages for conversation:", conversationId)
-          set({ isLoading: true })
-
-          // First verify the conversation belongs to the user
-          const { data: conversation, error: convError } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("id", conversationId)
-            .eq("user_id", userId)
-            .single()
-
-          if (convError || !conversation) {
-            throw new Error("Conversation not found or access denied")
-          }
-
-          const { data: messagesData, error: messagesError } = await supabase
-            .from("messages")
-            .select("*")
-            .eq("conversation_id", conversationId)
-            .order("created_at", { ascending: true })
-
-          if (messagesError) {
-            console.error("Messages error:", messagesError)
-            throw messagesError
-          }
-
-          console.log("Loaded messages:", messagesData)
-
-          const messages: Message[] = (messagesData || []).map((msg) => {
-            // Parse chart_data if it exists
-            let chartData = null
-            if (msg.chart_data) {
-              try {
-                chartData = typeof msg.chart_data === "string" ? JSON.parse(msg.chart_data) : msg.chart_data
-              } catch (e) {
-                console.error("Error parsing chart_data:", e)
-              }
-            }
-
-            // Parse diagram_data if it exists
-            let diagramData = null
-            if (msg.diagram_data) {
-              try {
-                diagramData = typeof msg.diagram_data === "string" ? JSON.parse(msg.diagram_data) : msg.diagram_data
-              } catch (e) {
-                console.error("Error parsing diagram_data:", e)
-              }
-            }
-
-            return {
-              id: msg.id,
-              content: msg.content || "",
-              type: (msg.type as MessageType) || "text",
-              role: (msg.role as "user" | "assistant") || "user",
-              chartData,
-              diagramData,
-              createdAt: new Date(msg.created_at),
-              chart_data: msg.chart_data,
-              diagram_data: msg.diagram_data,
-              file_attachment: msg.file_attachment,
-              created_at: msg.created_at,
-            }
-          })
-
-          set({ messages, currentConversationId: conversationId, error: null })
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to load messages"
-          console.error("Error in loadMessages:", error)
-          set({ error: errorMessage, messages: [] })
-        } finally {
-          set({ isLoading: false })
+          throw error
         }
       },
 
       addConversation: async (title) => {
         const id = crypto.randomUUID()
+        const newConversation: Conversation = {
+          id,
+          title,
+          messages: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          userId: (await supabase.auth.getUser()).data.user?.id || "",
+          isFavorite: false,
+        }
 
         try {
-          const {
-            data: { user },
-            error: userError,
-          } = await supabase.auth.getUser()
-          if (userError) throw userError
-          if (!user) throw new Error("No authenticated user")
-
-          const newConversation: Conversation = {
-            id,
-            title,
-            messages: [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            userId: user.id,
-            isFavorite: false,
-          }
-
-          console.log("Creating new conversation:", newConversation)
-
           const { error } = await supabase.from("conversations").insert({
             id: newConversation.id,
             title: newConversation.title,
             user_id: newConversation.userId,
             created_at: newConversation.createdAt.toISOString(),
             updated_at: newConversation.updatedAt.toISOString(),
-            is_favorite: false,
           })
 
-          if (error) {
-            console.error("Error creating conversation:", error)
-            throw error
-          }
+          if (error) throw error
 
           set((state) => ({
             conversations: [newConversation, ...state.conversations],
@@ -269,7 +183,6 @@ export const useConversationStore = create<ChatState>()(
           return id
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Failed to create conversation"
-          console.error("Error in addConversation:", error)
           set({ error: errorMessage })
           throw error
         }
@@ -331,10 +244,39 @@ export const useConversationStore = create<ChatState>()(
         }
       },
 
-      addMessage: (message: Message) => {
-        set((state) => ({
-          messages: [...state.messages, message],
-        }))
+      addMessage: async (conversationId, message) => {
+        try {
+          const { error } = await supabase.from("messages").insert({
+            id: crypto.randomUUID(),
+            conversation_id: conversationId,
+            content: message.content,
+            type: message.type,
+            role: message.role,
+            chart_data: message.chartData,
+            diagram_data: message.diagramData,
+            file_attachment: message.fileAttachment,
+            created_at: message.createdAt.toISOString(),
+          })
+
+          if (error) throw error
+
+          set((state) => ({
+            conversations: state.conversations.map((conv) =>
+              conv.id === conversationId
+                ? {
+                    ...conv,
+                    messages: [...conv.messages, { ...message, id: crypto.randomUUID() }],
+                    updatedAt: new Date(),
+                  }
+                : conv,
+            ),
+            error: null,
+          }))
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to add message"
+          set({ error: errorMessage })
+          throw error
+        }
       },
 
       setCurrentConversationId: (id) => set({ currentConversationId: id, isHomeView: !id }),
@@ -434,6 +376,7 @@ export const useConversationStore = create<ChatState>()(
             throw new Error("No active session")
           }
 
+          await get().loadConversations()
           set({ isInitialized: true })
         } catch (error) {
           console.error("Failed to initialize store:", error)
@@ -443,8 +386,6 @@ export const useConversationStore = create<ChatState>()(
           set({ isLoading: false })
         }
       },
-
-      setSupabase: (client) => set({ supabase: client }),
 
       getChartHistory: () => {
         const state = get()

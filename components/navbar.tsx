@@ -34,13 +34,6 @@ export function Navbar() {
             <Home className="h-4 w-4 mr-2" />
             Home
           </Button>
-          {user && (
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                Dashboard
-              </Button>
-            </Link>
-          )}
           <Link href="/about" className="hidden sm:block">
             <Button variant="ghost" size="sm">
               About

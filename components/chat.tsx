@@ -1,210 +1,256 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useConversationStore } from "@/lib/store"
+import { useRef, useEffect, useState } from "react"
+import { type Message, useConversationStore } from "@/lib/store"
+import { Card } from "@/components/ui/card"
 import { ChatMessage } from "@/components/chat-message"
 import { ChatInput } from "@/components/chat-input"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { motion, AnimatePresence } from "framer-motion"
+import { useToast } from "@/components/ui/use-toast"
+import { generateResponse } from "@/app/actions"
 import { Button } from "@/components/ui/button"
-import { RefreshCw } from "lucide-react"
-import { useAuth } from "@/components/auth-context"
-import { createChat } from "@/app/actions"
+import { X, Upload } from "lucide-react"
 
-interface Message {
-  id: string
-  content: string
-  role: "user" | "assistant"
-  type: "text" | "chart" | "diagram"
-  chart_data?: any
-  diagram_data?: any
-  file_attachment?: any
-  created_at: string
+declare global {
+  interface Crypto {
+    randomUUID: () => string
+  }
 }
 
-export function Chat() {
-  const { user } = useAuth()
-  const {
-    messages = [],
-    currentConversationId,
-    isLoading,
-    loadMessages,
-    loadConversations,
-    addMessage,
-  } = useConversationStore()
-  const [isSubmitting, setIsSubmitting] = useState(false)
+interface ChatProps {
+  isChartCreationMode: boolean
+  onExitChartMode: () => void
+}
 
-  console.log("Chat component render:", {
-    messagesCount: messages?.length || 0,
-    currentConversationId,
-    isLoading,
-    userId: user?.id,
-    messages: messages || [],
-  })
+export function Chat({ isChartCreationMode, onExitChartMode }: ChatProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const store = useConversationStore()
+  const [isLoading, setIsLoading] = useState(false)
+  const { toast } = useToast()
+
+  const currentConversation = store.conversations?.find((c) => c.id === store.currentConversationId) || null
+  const currentMessages = currentConversation?.messages ?? []
 
   useEffect(() => {
-    if (user?.id) {
-      console.log("Loading conversations for user:", user.id)
-      loadConversations(user.id)
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" })
     }
-  }, [user?.id, loadConversations])
+  }, [currentMessages.length])
 
   useEffect(() => {
-    if (currentConversationId && user?.id) {
-      console.log("Loading messages for conversation:", currentConversationId)
-      loadMessages(currentConversationId, user.id)
+    const initializeStore = async () => {
+      if (store.conversations.length === 0) {
+        try {
+          await store.loadConversations()
+        } catch (error) {
+          console.error("Failed to initialize store:", error)
+          toast({
+            title: "Error",
+            description: "Failed to load conversations. Please try again.",
+            variant: "destructive",
+          })
+        }
+      }
     }
-  }, [currentConversationId, user?.id, loadMessages])
 
-  const handleSendMessage = async (message: string) => {
-    if (!user?.id || isSubmitting) {
-      console.log("Cannot send message:", { userId: user?.id, isSubmitting })
+    initializeStore()
+  }, [store, toast])
+
+  const handleSend = async (content: string, chartType?: string) => {
+    if (!store.currentConversationId) {
+      toast({
+        title: "Error",
+        description: "No active conversation. Please start a new chat.",
+        variant: "destructive",
+      })
       return
     }
 
-    console.log("Sending message:", message)
-    setIsSubmitting(true)
+    if (!content?.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a message.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsLoading(true)
 
     try {
-      // Add user message to local state immediately
+      // Add user message
       const userMessage: Message = {
-        id: `temp-${Date.now()}`,
-        content: message,
+        id: crypto.randomUUID(),
+        content,
+        type: "text",
         role: "user",
-        type: "text",
-        created_at: new Date().toISOString(),
+        createdAt: new Date(),
+      }
+      await store.addMessage(store.currentConversationId, userMessage)
+
+      // Generate response
+      const response = await generateResponse(content, chartType)
+
+      if (!response) {
+        throw new Error("No response received from AI")
       }
 
-      addMessage(userMessage)
-
-      // Create chat via server action
-      const result = await createChat(message, user.id)
-
-      console.log("Chat creation result:", result)
-
-      if (result.success) {
-        // Add assistant message to local state
-        const assistantMessage: Message = {
-          id: `temp-assistant-${Date.now()}`,
-          content: result.message || "",
-          role: "assistant",
-          type: result.type || "text",
-          chart_data: result.chartData,
-          created_at: new Date().toISOString(),
-        }
-
-        addMessage(assistantMessage)
-
-        // Reload conversations and messages to sync with database
-        if (result.conversationId) {
-          await loadConversations(user.id)
-          await loadMessages(result.conversationId, user.id)
-        }
-      } else {
-        console.error("Failed to create chat:", result.error)
-        // Add error message
-        const errorMessage: Message = {
-          id: `error-${Date.now()}`,
-          content: `Error: ${result.error}`,
-          role: "assistant",
-          type: "text",
-          created_at: new Date().toISOString(),
-        }
-        addMessage(errorMessage)
-      }
-    } catch (error) {
-      console.error("Error sending message:", error)
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        content: "Sorry, there was an error processing your request. Please try again.",
+      // Create assistant message
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        content: response.type === "text" ? response.content : `Here's your ${response.chartType} chart:`,
+        type: response.type,
         role: "assistant",
+        createdAt: new Date(),
+        ...(response.type === "chart" && {
+          chartData: {
+            type: response.chartType,
+            title: response.title,
+            description: response.description || "",
+            data: response.data,
+            ...(response.chartType === "scatter" && {
+              xAxisLabel: response.xAxisLabel,
+              yAxisLabel: response.yAxisLabel,
+            }),
+          },
+        }),
+        ...(response.type === "diagram" && {
+          diagramData: {
+            type: response.diagramType,
+            title: response.title,
+            code: response.code,
+          },
+        }),
+      }
+
+      await store.addMessage(store.currentConversationId, assistantMessage)
+    } catch (error) {
+      console.error("Error in handleSend:", {
+        error,
+        message: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+      })
+
+      // Add error message to the conversation
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        content:
+          error instanceof Error
+            ? error.message
+            : "I apologize, but I encountered an error while processing your request.",
         type: "text",
-        created_at: new Date().toISOString(),
+        role: "assistant",
+        createdAt: new Date(),
       }
-      addMessage(errorMessage)
+
+      try {
+        await store.addMessage(store.currentConversationId, errorMessage)
+      } catch (e) {
+        console.error("Failed to add error message to conversation:", e)
+      }
+
+      // Show toast with user-friendly error message
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate response. Please try again later.",
+        variant: "destructive",
+      })
     } finally {
-      setIsSubmitting(false)
+      setIsLoading(false)
     }
   }
 
-  const handleRefresh = () => {
-    if (user?.id) {
-      loadConversations(user.id)
-      if (currentConversationId) {
-        loadMessages(currentConversationId, user.id)
-      }
+  const handleNewChat = async () => {
+    try {
+      const id = await store.addConversation("New Conversation")
+      store.setCurrentConversationId(id)
+      store.setIsHomeView(false)
+    } catch (error) {
+      console.error("Failed to create new conversation:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create a new conversation. Please try again.",
+        variant: "destructive",
+      })
     }
   }
-
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Please sign in</h2>
-          <p className="text-muted-foreground">You need to be signed in to use the chat.</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Ensure messages is always an array
-  const safeMessages = Array.isArray(messages) ? messages : []
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <div>
-          <h1 className="text-lg font-semibold">Chart Bot</h1>
-          <p className="text-sm text-muted-foreground">
-            Messages: {safeMessages.length} | Conversation: {currentConversationId || "None"}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
-          <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
-
-      {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-4">
-          {safeMessages.length === 0 && !isLoading ? (
-            <div className="text-center py-8">
-              <div className="bg-muted rounded-lg p-6 max-w-md mx-auto">
-                <h3 className="font-semibold mb-2">Welcome to Chart Bot!</h3>
-                <p className="text-sm text-muted-foreground">
-                  I'm specialized in creating charts and data visualizations. Ask me to create a chart, graph, or
-                  visualize some data!
-                </p>
-                <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-                  <p>Try asking:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>"Make a bar chart of top 5 tech companies"</li>
-                    <li>"Create a pie chart of sales data"</li>
-                    <li>"Show me a line graph of monthly revenue"</li>
-                  </ul>
-                </div>
-              </div>
+      <AnimatePresence>
+        {isChartCreationMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="flex justify-between items-center mb-4 px-4 py-2 bg-zinc-900/50 rounded-lg"
+          >
+            <div className="flex items-center gap-4">
+              <h2 className="text-2xl font-bold text-white">Chart Creation</h2>
+              <Button variant="outline" size="icon">
+                <Upload className="h-4 w-4" />
+              </Button>
             </div>
-          ) : (
-            safeMessages.map((message) => <ChatMessage key={message.id} message={message} />)
-          )}
+            <Button variant="ghost" size="icon" onClick={onExitChartMode}>
+              <X className="h-5 w-5" />
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          {isLoading && (
-            <div className="flex justify-center py-4">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+      {currentConversation && (
+        <>
+          <div className="bg-zinc-900 p-4 border-b border-gray-800">
+            <h2 className="text-xl font-semibold text-white">{currentConversation.title}</h2>
+          </div>
+          <Card className="flex-1 border-0 bg-zinc-950 rounded-none sm:rounded-lg overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-y-auto">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+                className="flex flex-col gap-4 p-4"
+              >
+                {currentMessages.map((message, index) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ y: 50, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5, delay: index * 0.1 }}
+                  >
+                    <ChatMessage message={message} />
+                  </motion.div>
+                ))}
+                {isLoading && (
+                  <div className="flex gap-2 items-center text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce" />
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce [animation-delay:0.2s]" />
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce [animation-delay:0.4s]" />
+                  </div>
+                )}
+                <div ref={scrollRef} />
+              </motion.div>
             </div>
-          )}
+            <ChatInput onSend={handleSend} isLoading={isLoading} />
+          </Card>
+        </>
+      )}
+      {!currentConversation && (
+        <div className="flex items-center justify-center h-full">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Button
+              onClick={handleNewChat}
+              className="bg-green-500 hover:bg-green-600 text-white font-medium shadow-lg transition-all duration-200"
+            >
+              Start New Chat
+            </Button>
+          </motion.div>
         </div>
-      </ScrollArea>
-
-      {/* Input */}
-      <div className="border-t p-4">
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          disabled={isSubmitting || isLoading}
-          placeholder={isSubmitting ? "Sending..." : "Ask me to create a chart or visualization..."}
-        />
-      </div>
+      )}
     </div>
   )
 }
