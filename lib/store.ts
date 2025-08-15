@@ -38,6 +38,8 @@ export interface Conversation {
   createdAt: Date
   updatedAt: Date
   userId?: string
+  isFavorite?: boolean
+  previewUrl?: string
 }
 
 interface ConversationStore {
@@ -45,6 +47,7 @@ interface ConversationStore {
   currentConversationId: string | null
   isHomeView: boolean
   isLoading: boolean
+  isRefreshing: boolean
   error: string | null
 
   // Actions
@@ -56,6 +59,10 @@ interface ConversationStore {
   setCurrentConversationId: (id: string | null) => void
   setIsHomeView: (isHome: boolean) => void
   clearError: () => void
+  toggleFavorite: (id: string) => Promise<void>
+  getChartHistory: () => Conversation[]
+  getCurrentConversation: () => Conversation | null
+  setIsRefreshing: (isRefreshing: boolean) => void
 }
 
 export const useConversationStore = create<ConversationStore>()(
@@ -65,6 +72,7 @@ export const useConversationStore = create<ConversationStore>()(
       currentConversationId: null,
       isHomeView: true,
       isLoading: false,
+      isRefreshing: false,
       error: null,
 
       loadConversations: async () => {
@@ -113,6 +121,7 @@ export const useConversationStore = create<ConversationStore>()(
                   createdAt: new Date(conv.created_at),
                   updatedAt: new Date(conv.updated_at),
                   userId: conv.user_id,
+                  isFavorite: conv.is_favorite || false,
                 }
               }
 
@@ -132,6 +141,7 @@ export const useConversationStore = create<ConversationStore>()(
                 createdAt: new Date(conv.created_at),
                 updatedAt: new Date(conv.updated_at),
                 userId: conv.user_id,
+                isFavorite: conv.is_favorite || false,
               }
             }),
           )
@@ -178,6 +188,7 @@ export const useConversationStore = create<ConversationStore>()(
               createdAt: new Date(),
               updatedAt: new Date(),
               userId,
+              isFavorite: false,
             }
 
             set((state) => ({
@@ -195,6 +206,7 @@ export const useConversationStore = create<ConversationStore>()(
             createdAt: new Date(data.created_at),
             updatedAt: new Date(data.updated_at),
             userId: data.user_id,
+            isFavorite: data.is_favorite || false,
           }
 
           set((state) => ({
@@ -216,6 +228,7 @@ export const useConversationStore = create<ConversationStore>()(
             createdAt: new Date(),
             updatedAt: new Date(),
             userId,
+            isFavorite: false,
           }
 
           set((state) => ({
@@ -365,12 +378,58 @@ export const useConversationStore = create<ConversationStore>()(
         }
       },
 
+      toggleFavorite: async (id: string) => {
+        try {
+          const conversation = get().conversations.find((c) => c.id === id)
+          if (!conversation) throw new Error("Conversation not found")
+
+          const newFavoriteStatus = !conversation.isFavorite
+
+          const { error } = await supabase.from("conversations").update({ is_favorite: newFavoriteStatus }).eq("id", id)
+
+          if (error) {
+            console.error("Error toggling favorite:", error)
+          }
+
+          set((state) => ({
+            conversations: state.conversations.map((c) => (c.id === id ? { ...c, isFavorite: newFavoriteStatus } : c)),
+          }))
+        } catch (error) {
+          console.error("Error in toggleFavorite:", error)
+          // Still update local state
+          set((state) => ({
+            conversations: state.conversations.map((c) => (c.id === id ? { ...c, isFavorite: !c.isFavorite } : c)),
+            error: "Updated locally - database may be unavailable",
+          }))
+        }
+      },
+
+      getChartHistory: () => {
+        const state = get()
+        return state.conversations
+          .filter((conv) => conv.messages.some((msg) => msg.type === "chart"))
+          .sort((a, b) => {
+            const dateA = a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt)
+            const dateB = b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt)
+            return dateB.getTime() - dateA.getTime()
+          })
+      },
+
+      getCurrentConversation: () => {
+        const state = get()
+        return state.conversations.find((c) => c.id === state.currentConversationId) || null
+      },
+
       setCurrentConversationId: (id: string | null) => {
         set({ currentConversationId: id })
       },
 
       setIsHomeView: (isHome: boolean) => {
         set({ isHomeView: isHome })
+      },
+
+      setIsRefreshing: (isRefreshing: boolean) => {
+        set({ isRefreshing })
       },
 
       clearError: () => {
@@ -387,3 +446,6 @@ export const useConversationStore = create<ConversationStore>()(
     },
   ),
 )
+
+// Export for backward compatibility
+export const useChatStore = useConversationStore
