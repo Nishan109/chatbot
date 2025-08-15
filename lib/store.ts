@@ -366,18 +366,22 @@ export const useConversationStore = create<ChatState>()(
           if (userError) throw userError
           if (!user) throw new Error("No authenticated user")
 
-          // Prepare data for database - only include columns that exist
+          // Prepare base message data with all required fields
           const messageData: any = {
             id: message.id,
-            conversation_id: conversationId,
             user_id: user.id,
             content: message.content,
-            type: message.type,
             role: message.role,
+            type: message.type || "text", // Ensure type is always set
             created_at: message.createdAt.toISOString(),
           }
 
-          // Only add optional columns if they have data
+          // Add conversation_id if provided
+          if (conversationId) {
+            messageData.conversation_id = conversationId
+          }
+
+          // Only add optional JSONB columns if they have data
           if (message.chartData) {
             messageData.chart_data = message.chartData
           }
@@ -399,14 +403,16 @@ export const useConversationStore = create<ChatState>()(
             throw error
           }
 
-          // Update conversation's updated_at timestamp
-          const { error: updateError } = await supabase
-            .from("conversations")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("id", conversationId)
+          // Update conversation's updated_at timestamp if conversation exists
+          if (conversationId) {
+            const { error: updateError } = await supabase
+              .from("conversations")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", conversationId)
 
-          if (updateError) {
-            console.error("Error updating conversation timestamp:", updateError)
+            if (updateError) {
+              console.error("Error updating conversation timestamp:", updateError)
+            }
           }
 
           // Update local state
