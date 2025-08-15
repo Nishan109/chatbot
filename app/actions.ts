@@ -1,271 +1,307 @@
 "use server"
 
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { generateText } from "ai"
+import { google } from "@ai-sdk/google"
+import { createClient } from "@supabase/supabase-js"
+import { revalidatePath } from "next/cache"
 
-// Initialize the Google AI SDK with your API key
-if (!process.env.GEMINI_API_KEY) {
-  throw new Error("GEMINI_API_KEY is not configured")
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+
+function isChartRequest(prompt: string): boolean {
+  const chartKeywords = [
+    "chart",
+    "graph",
+    "plot",
+    "visualization",
+    "visualize",
+    "data",
+    "bar chart",
+    "line chart",
+    "pie chart",
+    "scatter plot",
+    "histogram",
+    "show me",
+    "create",
+    "generate",
+    "make",
+    "draw",
+    "display",
+    "compare",
+    "analysis",
+    "trend",
+    "distribution",
+    "correlation",
+  ]
+
+  const lowerPrompt = prompt.toLowerCase()
+  return chartKeywords.some((keyword) => lowerPrompt.includes(keyword))
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-
-function getSystemPrompt(chartType?: string) {
-  if (chartType === "scatter") {
-    return `You are a chart generation assistant. Generate a scatter plot based on the prompt.
-    Return ONLY a JSON object in this format:
-    {
-      "type": "chart",
-      "chartType": "scatter",
-      "title": "Chart Title",
-      "description": "Chart Description",
-      "xAxisLabel": "X-axis label",
-      "yAxisLabel": "Y-axis label",
-      "data": [
-        {
-          "name": "Series name",
-          "data": [
-            { "x": number, "y": number, "label": "string (optional)" }
-          ]
-        }
-      ]
-    }
-    Include 15-30 realistic data points that show meaningful patterns.`
-  }
-
-  return `You are a chart and diagram generation assistant. Return ONLY a JSON object in one of these formats:
-
-  For charts:
-  {
-    "type": "chart",
-    "chartType": "bar" | "line" | "pie" | "radar",
-    "title": "Chart Title",
-    "description": "Chart Description",
-    "data": [{"name": "Label 1", "value": 100}]
-  }
-
-  For diagrams:
-  {
-    "type": "diagram",
-    "diagramType": "flowchart",
-    "title": "Diagram Title",
-    "code": "flowchart TD\\n  A[CPU] --> B[Memory]"
-  }
-
-  For text:
-  {
-    "type": "text",
-    "content": "Your text response"
-  }
-
-  RULES:
-  1. For radar charts, provide 5-8 categories
-  2. All values should be between 0-100
-  3. Ensure valid JSON format
-  4. DO NOT include any text outside the JSON`
-}
-
-function sanitizeText(text: string | undefined | null): string {
-  if (!text) return ""
-
-  return text
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
-    .replace(/\*\*/g, "")
-    .replace(/##/g, "")
-    .replace(/\n+/g, " ")
-    .trim()
-}
-
-function parseChartData(text: string | undefined | null, chartType?: string) {
-  if (!text) {
-    throw new Error("Invalid input: Text is required")
-  }
-
+export async function createConversation(prompt: string, userId?: string) {
   try {
-    // Extract JSON from response
-    const trimmedText = text.trim()
-    const jsonMatch = trimmedText.match(/\{[\s\S]*\}/)
+    console.log("Creating conversation with prompt:", prompt)
+    console.log("User ID:", userId)
+    console.log("Is chart request:", isChartRequest(prompt))
 
-    if (!jsonMatch) {
-      throw new Error("No valid JSON found in response")
+    // Always use Gemini API for chat creation
+    let result
+    try {
+      console.log("Using gemini-2.0-flash-exp model")
+      result = await generateText({
+        model: google("gemini-2.0-flash-exp"),
+        prompt: `You are a helpful AI assistant that specializes in data visualization and chart creation. 
+        
+User request: ${prompt}
+
+${
+  isChartRequest(prompt)
+    ? `
+This appears to be a chart request. Please provide:
+1. A brief explanation of what chart would be appropriate
+2. Sample data structure that would work for this visualization
+3. Chart configuration in JSON format
+
+Format your response as JSON with this structure:
+{
+  "explanation": "Brief explanation of the chart",
+  "chartData": [array of data objects],
+  "chartConfig": {
+    "type": "bar|line|pie|scatter",
+    "title": "Chart Title",
+    "xAxis": "x-axis label",
+    "yAxis": "y-axis label"
+  }
+}
+`
+    : "Please provide a helpful response to the user's request."
+}`,
+        maxTokens: 1000,
+      })
+    } catch (error) {
+      console.log("Primary model failed, trying fallback: gemini-1.5-flash")
+      result = await generateText({
+        model: google("gemini-1.5-flash"),
+        prompt: `You are a helpful AI assistant. Please respond to: ${prompt}`,
+        maxTokens: 1000,
+      })
     }
 
-    const parsed = JSON.parse(jsonMatch[0])
+    console.log("AI Response received:", result.text.substring(0, 200) + "...")
 
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Invalid JSON structure")
+    // Create conversation in database
+    const { data: conversation, error: convError } = await supabase
+      .from("conversations")
+      .insert({
+        title: prompt.substring(0, 100),
+        user_id: userId || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (convError) {
+      console.error("Error creating conversation:", convError)
+      throw convError
     }
 
-    // For scatter plots
-    if (chartType === "scatter") {
-      if (!parsed.data || !Array.isArray(parsed.data)) {
-        throw new Error("Invalid scatter plot data structure")
+    console.log("Conversation created:", conversation.id)
+
+    // Create user message
+    const { error: userMsgError } = await supabase.from("messages").insert({
+      conversation_id: conversation.id,
+      content: prompt,
+      role: "user",
+      created_at: new Date().toISOString(),
+    })
+
+    if (userMsgError) {
+      console.error("Error creating user message:", userMsgError)
+      throw userMsgError
+    }
+
+    // Create assistant message
+    const { error: assistantMsgError } = await supabase.from("messages").insert({
+      conversation_id: conversation.id,
+      content: result.text,
+      role: "assistant",
+      created_at: new Date().toISOString(),
+    })
+
+    if (assistantMsgError) {
+      console.error("Error creating assistant message:", assistantMsgError)
+      throw assistantMsgError
+    }
+
+    console.log("Messages created successfully")
+
+    revalidatePath("/dashboard")
+    revalidatePath(`/chat/${conversation.id}`)
+
+    return {
+      success: true,
+      conversationId: conversation.id,
+      response: result.text,
+    }
+  } catch (error) {
+    console.error("Error in createConversation:", error)
+
+    // Provide fallback response for chart requests
+    if (isChartRequest(prompt)) {
+      const fallbackResponse = {
+        explanation: "I can help you create a chart for your data visualization needs.",
+        chartData: [
+          { name: "Sample A", value: 30 },
+          { name: "Sample B", value: 45 },
+          { name: "Sample C", value: 25 },
+        ],
+        chartConfig: {
+          type: "bar",
+          title: "Sample Chart",
+          xAxis: "Categories",
+          yAxis: "Values",
+        },
       }
 
       return {
-        type: "chart",
-        chartType: "scatter",
-        title: sanitizeText(parsed.title),
-        description: sanitizeText(parsed.description),
-        xAxisLabel: sanitizeText(parsed.xAxisLabel),
-        yAxisLabel: sanitizeText(parsed.yAxisLabel),
-        data: parsed.data.map((series: any) => ({
-          name: sanitizeText(series.name),
-          data: Array.isArray(series.data)
-            ? series.data.map((point: any) => ({
-                x: Number(point.x) || 0,
-                y: Number(point.y) || 0,
-                label: point.label ? sanitizeText(point.label) : undefined,
-              }))
-            : [],
-        })),
+        success: true,
+        conversationId: "fallback",
+        response: JSON.stringify(fallbackResponse),
       }
     }
 
-    // For other chart types
     return {
-      type: parsed.type,
-      chartType: parsed.chartType,
-      title: sanitizeText(parsed.title),
-      description: sanitizeText(parsed.description),
-      data: Array.isArray(parsed.data)
-        ? parsed.data.map((item: any) => ({
-            name: sanitizeText(item.name),
-            value: Number(item.value) || 0,
-          }))
-        : [],
-      ...(parsed.type === "diagram" && {
-        code: parsed.code || "",
-      }),
-      ...(parsed.type === "text" && {
-        content: sanitizeText(parsed.content),
-      }),
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
     }
-  } catch (error) {
-    console.error("Error parsing response:", error)
-    throw new Error(`Failed to parse response: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
 
-async function generateWithModel(modelName: string, prompt: string) {
-  const model = genAI.getGenerativeModel({ model: modelName })
-  const result = await model.generateContent(prompt)
-  const response = await result.response
-  return response.text()
-}
-
-export async function generateResponse(message: string, chartType?: string) {
-  if (!message?.trim()) {
-    throw new Error("Message is required")
-  }
-
-  console.log("Generating response for message:", message, "chartType:", chartType)
-
+export async function addMessage(conversationId: string, content: string, role: "user" | "assistant") {
   try {
-    // Prepare the prompt
-    const prompt = `${getSystemPrompt(chartType)}\n\n${message}`
-
-    // Try with gemini-2.0-flash-exp first, then fallback to gemini-1.5-flash
-    let text: string | undefined
-    try {
-      text = await generateWithModel("gemini-2.0-flash-exp", prompt)
-      console.log("Successfully used gemini-2.0-flash-exp")
-    } catch (error) {
-      console.log("Falling back to gemini-1.5-flash due to error:", error)
-      // Fall back to gemini-1.5-flash if 2.0 fails
-      text = await generateWithModel("gemini-1.5-flash", prompt)
-      console.log("Successfully used gemini-1.5-flash fallback")
-    }
-
-    if (!text?.trim()) {
-      throw new Error("Empty response received from Gemini")
-    }
-
-    console.log("Raw response:", text)
-
-    const parsedResponse = parseChartData(text, chartType)
-
-    if (!parsedResponse.type) {
-      throw new Error("Invalid response: missing type")
-    }
-
-    switch (parsedResponse.type) {
-      case "diagram":
-        if (!parsedResponse.diagramType || !parsedResponse.title || !parsedResponse.code) {
-          throw new Error("Invalid diagram data: missing required properties")
-        }
-        return {
-          type: "diagram" as const,
-          diagramType: parsedResponse.diagramType,
-          title: sanitizeText(parsedResponse.title),
-          code: parsedResponse.code,
-        }
-
-      case "chart":
-        if (!parsedResponse.chartType || !parsedResponse.title || !Array.isArray(parsedResponse.data)) {
-          throw new Error("Invalid chart data: missing required properties")
-        }
-        return {
-          type: "chart" as const,
-          chartType: parsedResponse.chartType,
-          title: sanitizeText(parsedResponse.title),
-          description: sanitizeText(parsedResponse.description || ""),
-          data: parsedResponse.data.map((item: any) => ({
-            name: sanitizeText(item.name),
-            value: Number(item.value) || 0,
-          })),
-          ...(parsedResponse.chartType === "scatter" && {
-            xAxisLabel: parsedResponse.xAxisLabel,
-            yAxisLabel: parsedResponse.yAxisLabel,
-          }),
-        }
-
-      case "text":
-        if (!parsedResponse.content) {
-          throw new Error("Invalid text response: missing content")
-        }
-        return {
-          type: "text" as const,
-          content: sanitizeText(parsedResponse.content),
-        }
-
-      default:
-        throw new Error(`Unsupported response type: ${parsedResponse.type}`)
-    }
-  } catch (error) {
-    console.error("Error in generateResponse:", {
-      error,
-      message: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      content,
+      role,
+      created_at: new Date().toISOString(),
     })
 
-    // Handle specific Gemini API errors
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase()
+    if (error) throw error
 
-      if (
-        errorMessage.includes("model not found") ||
-        errorMessage.includes("not supported") ||
-        errorMessage.includes("unavailable")
-      ) {
-        throw new Error("The AI service is temporarily unavailable. Please try again in a few minutes.")
-      }
+    revalidatePath(`/chat/${conversationId}`)
+    return { success: true }
+  } catch (error) {
+    console.error("Error adding message:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
 
-      if (errorMessage.includes("quota") || errorMessage.includes("rate limit")) {
-        throw new Error("Service quota exceeded. Please try again later.")
-      }
+export async function getConversation(id: string) {
+  try {
+    const { data: conversation, error: convError } = await supabase
+      .from("conversations")
+      .select("*")
+      .eq("id", id)
+      .single()
 
-      if (errorMessage.includes("permission") || errorMessage.includes("unauthorized")) {
-        throw new Error("Authentication error. Please check your API key configuration.")
-      }
+    if (convError) throw convError
 
-      if (errorMessage.includes("safety") || errorMessage.includes("blocked")) {
-        throw new Error("The request was blocked by safety filters. Please try rephrasing your request.")
-      }
+    const { data: messages, error: msgError } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", id)
+      .order("created_at", { ascending: true })
 
-      throw error
+    if (msgError) throw msgError
+
+    return {
+      success: true,
+      conversation: {
+        ...conversation,
+        messages: messages || [],
+      },
+    }
+  } catch (error) {
+    console.error("Error getting conversation:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function getConversations(userId?: string) {
+  try {
+    let query = supabase.from("conversations").select("*").order("updated_at", { ascending: false })
+
+    if (userId) {
+      query = query.eq("user_id", userId)
     }
 
-    // For unexpected errors
-    throw new Error("An unexpected error occurred. Please try again later.")
+    const { data, error } = await query
+
+    if (error) throw error
+
+    return {
+      success: true,
+      conversations: data || [],
+    }
+  } catch (error) {
+    console.error("Error getting conversations:", error)
+    return {
+      success: false,
+      conversations: [],
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function deleteConversation(id: string) {
+  try {
+    // Delete messages first (due to foreign key constraint)
+    const { error: msgError } = await supabase.from("messages").delete().eq("conversation_id", id)
+
+    if (msgError) throw msgError
+
+    // Delete conversation
+    const { error: convError } = await supabase.from("conversations").delete().eq("id", id)
+
+    if (convError) throw convError
+
+    revalidatePath("/dashboard")
+    return { success: true }
+  } catch (error) {
+    console.error("Error deleting conversation:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function updateConversationTitle(id: string, title: string) {
+  try {
+    const { error } = await supabase
+      .from("conversations")
+      .update({
+        title,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+
+    if (error) throw error
+
+    revalidatePath("/dashboard")
+    revalidatePath(`/chat/${id}`)
+    return { success: true }
+  } catch (error) {
+    console.error("Error updating conversation title:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
   }
 }
